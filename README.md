@@ -1,6 +1,6 @@
 # AI Hub
 
-## Changelog / Latest Updates (June 2024)
+## Changelog / Latest Updates (June 2025)
 
 - **All LLM providers (OpenAI, Anthropic, Gemini) now route through the backend for chat and key validation.**
 - **Provider portals:** The "Run a Command" section has been removed for a cleaner, less confusing UI.
@@ -159,6 +159,24 @@ The app will be available at `http://localhost:5173` by default.
 
 ## License
 MIT
+
+---
+
+For questions or support, contact [Senti Labs](https://sentilabs.com)
+
+## Changelog / Older Updates (June 2024)
+
+### UI / UX
+* New draggable + resizable Chat window with full-history scrolling and ↑ / ↓ command recall (VS-Code style).
+* Dark-mode logo set (white OpenAI, Anthropic, GitHub) with automatic colour ↔︎ mono swap.
+
+### Integrations
+* Gmail executor wired – commands like `/gmail list-messages`, `list inbox`, `search emails for "foo"` now hit MCP just like Drive & GitHub.
+* Intent-parsers extended: GitHub, Drive, Gmail recognise more natural phrases.
+
+### Dev DX
+* `src/components/ui/ChatBar.tsx` no longer hides all but the last three messages.
+* README updated 🙂
 
 ---
 
