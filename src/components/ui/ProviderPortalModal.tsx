@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { X } from 'lucide-react';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
@@ -8,11 +8,12 @@ import { MCPServerService } from '../../services/mcpServerService';
 import { fetchMCPCommands, runMCPCommand } from '../../services/mcpApiService';
 import { jwtDecode } from 'jwt-decode';
 import { useAuth } from '../../hooks/useAuth';
-import { GoogleLogin } from '@react-oauth/google';
+import { GoogleLogin, useGoogleLogin } from '@react-oauth/google';
 import { verifyGithubToken } from '../../services/githubService';
 import { getCredential, saveCredential, deleteCredential } from '../../services/credentialsService';
 import { validateZapierApiKey } from '../../services/zapierService';
 import { validateOpenAIApiKey } from '../../services/openaiService';
+import { prettyPrintResult } from '../../utils/prettyPrint';
 
 interface ProviderPortalModalProps {
   isOpen: boolean;
@@ -170,7 +171,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
     }
     try {
       const result = await runMCPCommand(server.apiUrl, userToken, commandInput.trim(), {}, provider.id);
-      setCommandResult(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
+      setCommandResult(prettyPrintResult(provider.id, result));
     } catch (err: any) {
       setCommandError(err.message || 'Failed to run command');
     } finally {
@@ -217,23 +218,6 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
       setOpenAITesting(false);
       setTimeout(() => setOpenAIFeedback(null), 4000);
     }
-  };
-
-  // Dummy OAuth handlers (replace with your real OAuth logic)
-  const handleGoogleDriveLoginSuccess = (cred: any) => {
-    localStorage.setItem('googleToken', cred.credential);
-    try {
-      const decoded: any = jwtDecode(cred.credential);
-      setDriveEmail(decoded.email || '');
-    } catch {
-      setDriveEmail('');
-    }
-    setDriveConnected(true);
-  };
-  const handleDisconnectDrive = () => {
-    localStorage.removeItem('googleToken');
-    setDriveConnected(false);
-    setDriveEmail('');
   };
 
   const handleGmailLoginSuccess = (cred: any) => {
@@ -352,32 +336,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
           <div className="mb-6">
             <h3 className="text-sm font-semibold mb-2">Accounts</h3>
             {provider.id === 'openai' ? (
-              <div className="flex flex-col space-y-2">
-                <label className="text-xs font-medium">OpenAI API Key <span className="text-red-500">*</span></label>
-                <input
-                  type="password"
-                  value={openAIApiKey}
-                  onChange={e => { setOpenAIApiKey(e.target.value); setOpenAIApiKeySaved(false); setOpenAIFeedback(null); }}
-                  placeholder="sk-..."
-                  className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
-                  autoComplete="off"
-                />
-                <div className="flex items-center space-x-2">
-                  <Button onClick={handleSaveOpenAIApiKey} disabled={!openAIApiKey || openAIApiKeySaved} size="sm">
-                    {openAIApiKeySaved ? 'Saved' : 'Save'}
-                  </Button>
-                  {openAIApiKeySaved && (
-                    <Button onClick={handleRemoveOpenAIApiKey} variant="destructive" size="sm">Remove</Button>
-                  )}
-                  <Button onClick={handleTestOpenAIApiKey} disabled={!openAIApiKey || openAITesting} size="sm" variant="secondary">
-                    {openAITesting ? 'Testing...' : 'Test Key'}
-                  </Button>
-                </div>
-                {openAIFeedback && (
-                  <div className={`text-xs mt-1 ${openAIFeedback.includes('valid') ? 'text-green-600' : 'text-red-500'}`}>{openAIFeedback}</div>
-                )}
-                <span className="text-xs text-gray-500">Required for all OpenAI commands. Your key is stored locally and never shared.</span>
-              </div>
+              <OpenAIKeyManager darkMode={darkMode} />
             ) : provider.id === 'anthropic' ? (
               <AnthropicKeyManager darkMode={darkMode} feedback={anthropicFeedback} setFeedback={setAnthropicFeedback} testing={anthropicTesting} setTesting={setAnthropicTesting} />
             ) : provider.id === 'gemini' ? (
@@ -615,27 +574,46 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     const token = localStorage.getItem('googleToken') || '';
     setDriveToken(token);
     if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        setDriveEmail(payload.email || '');
-      } catch {
-        setDriveEmail('');
+      if (token.includes('.')) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          setDriveEmail(payload.email || '');
+        } catch {
+          // fallthrough to fetch profile
+        }
+      }
+      if (!driveEmail) {
+        // attempt to fetch profile with access token
+        fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+          .then(r => r.ok ? r.json() : null)
+          .then(u => setDriveEmail(u?.email || ''))
+          .catch(() => setDriveEmail(''));
       }
     } else {
       setDriveEmail('');
     }
   }, []);
 
-  const handleLoginSuccess = (cred: any) => {
-    localStorage.setItem('googleToken', cred.credential);
-    try {
-      const payload = JSON.parse(atob(cred.credential.split('.')[1]));
-      setDriveEmail(payload.email || '');
-    } catch {
-      setDriveEmail('');
-    }
-    setDriveToken(cred.credential);
-  };
+  const driveLogin = useGoogleLogin({
+    scope: 'https://www.googleapis.com/auth/drive.readonly',
+    flow: 'implicit',
+    onSuccess: (tokenResponse) => {
+      if (tokenResponse.access_token) {
+        localStorage.setItem('googleToken', tokenResponse.access_token);
+        setDriveToken(tokenResponse.access_token);
+        // Optional: fetch userinfo for email
+        fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+        })
+          .then(r => r.json())
+          .then(u => setDriveEmail(u.email || ''))
+          .catch(() => setDriveEmail(''));
+      }
+    },
+    onError: () => alert('Google Drive login failed'),
+  });
 
   const handleDisconnect = () => {
     localStorage.removeItem('googleToken');
@@ -652,12 +630,7 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           <Button onClick={handleDisconnect} variant="destructive" size="sm">Disconnect</Button>
         </>
       ) : (
-        <GoogleLogin
-          onSuccess={handleLoginSuccess}
-          onError={() => alert('Google Drive login failed')}
-          useOneTap={false}
-          width={240}
-        />
+        <Button onClick={() => driveLogin()} className={`${darkMode ? 'bg-blue-700 text-white' : ''}`}>Connect Google Drive</Button>
       )}
       <span className="text-xs text-gray-500">Connect any Google account for Drive integration. This is independent of app login.</span>
     </div>
@@ -1048,6 +1021,86 @@ const MakeKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         {saved && <Button size="sm" variant="destructive" onClick={remove}>Remove</Button>}
       </div>
       <span className="text-xs text-gray-500">Stored only in this browser. Used by Make.com custom app.</span>
+    </div>
+  );
+};
+
+const OpenAIKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
+  const [openAIApiKey, setOpenAIApiKey] = React.useState('');
+  const [openAIApiKeySaved, setOpenAIApiKeySaved] = React.useState(false);
+  const [openAIFeedback, setOpenAIFeedback] = React.useState<string | null>(null);
+  const [openAITesting, setOpenAITesting] = React.useState(false);
+
+  React.useEffect(() => {
+    const stored = localStorage.getItem('openai_token') || '';
+    setOpenAIApiKey(stored);
+    setOpenAIApiKeySaved(!!stored);
+  }, []);
+
+  const handleSave = () => {
+    localStorage.setItem('openai_token', openAIApiKey);
+    setOpenAIApiKeySaved(true);
+    setOpenAIFeedback('API key saved successfully!');
+    setOpenAIApiKey(localStorage.getItem('openai_token') || '');
+    setTimeout(() => setOpenAIFeedback(null), 2000);
+  };
+
+  const handleRemove = () => {
+    localStorage.removeItem('openai_token');
+    setOpenAIApiKey('');
+    setOpenAIApiKeySaved(false);
+    setOpenAIFeedback('API key removed.');
+    setTimeout(() => setOpenAIFeedback(null), 2000);
+  };
+
+  const handleTest = async () => {
+    setOpenAITesting(true);
+    setOpenAIFeedback(null);
+    try {
+      const status = await validateOpenAIApiKey(openAIApiKey);
+      if (status === 'valid') {
+        setOpenAIFeedback('API key is valid ✅');
+      } else if (status === 'quota_exceeded') {
+        setOpenAIFeedback('Key is valid but your OpenAI quota is exhausted. Check billing.');
+      } else if (status === 'invalid') {
+        setOpenAIFeedback('OpenAI rejected this key.');
+      } else {
+        setOpenAIFeedback('Unable to verify key (network or unknown error).');
+      }
+    } catch (err: any) {
+      setOpenAIFeedback('API key test failed: ' + (err.message || 'Unknown error'));
+    } finally {
+      setOpenAITesting(false);
+      setTimeout(() => setOpenAIFeedback(null), 4000);
+    }
+  };
+
+  return (
+    <div className="flex flex-col space-y-2">
+      <label className="text-xs font-medium">OpenAI API Key <span className="text-red-500">*</span></label>
+      <input
+        type="password"
+        value={openAIApiKey}
+        onChange={e => { setOpenAIApiKey(e.target.value); setOpenAIApiKeySaved(false); setOpenAIFeedback(null); }}
+        placeholder="sk-..."
+        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+        autoComplete="off"
+      />
+      <div className="flex items-center space-x-2">
+        <Button onClick={handleSave} disabled={!openAIApiKey || openAIApiKeySaved} size="sm">
+          {openAIApiKeySaved ? 'Saved' : 'Save'}
+        </Button>
+        {openAIApiKeySaved && (
+          <Button onClick={handleRemove} variant="destructive" size="sm">Remove</Button>
+        )}
+        <Button onClick={handleTest} disabled={!openAIApiKey || openAITesting} size="sm" variant="secondary">
+          {openAITesting ? 'Testing...' : 'Test Key'}
+        </Button>
+      </div>
+      {openAIFeedback && (
+        <div className={`text-xs mt-1 ${openAIFeedback.includes('valid') ? 'text-green-600' : 'text-red-500'}`}>{openAIFeedback}</div>
+      )}
+      <span className="text-xs text-gray-500">Required for all OpenAI commands. Your key is stored locally and never shared.</span>
     </div>
   );
 }; 

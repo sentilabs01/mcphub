@@ -21,6 +21,7 @@ import { MCPServerService } from '../../services/mcpServerService';
 import { runMCPCommand, fetchMCPCommands } from '../../services/mcpApiService';
 import { jwtDecode } from 'jwt-decode';
 import { getUserIntegrationAccounts } from '../../services/userIntegrationAccountsService';
+import { prettyPrintResult } from '../../utils/prettyPrint';
 
 const PROVIDER_OPTIONS: { label: string; value: LLMProvider }[] = [
   { label: 'OpenAI', value: 'openai' },
@@ -95,7 +96,7 @@ function parseGithubIntent(input: string): string | null {
 // Simple intent parser for Google Drive
 function parseDriveIntent(input: string): string | null {
   const lower = input.toLowerCase();
-  if (lower.includes('list drive files') || lower.includes('list my drive files')) return '/drive List files';
+  if (lower.includes('list drive files') || lower.includes('list my drive files') || lower.includes('get drive files') || lower.includes('drive files')) return '/drive List files';
   const uploadMatch = lower.match(/upload (.+) to drive/);
   if (uploadMatch) {
     return `/drive Upload ${uploadMatch[1]}`;
@@ -360,7 +361,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         }
         try {
           const result = await runMCPCommand(server.apiUrl, githubToken, cleanCmd, {}, 'github');
-          setMessages(prev => [...prev, { role: 'assistant', content: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]);
+          setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('github', result) }]);
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run GitHub command.' }]);
         }
@@ -380,7 +381,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         }
         try {
           const result = await runMCPCommand(server.apiUrl, googleToken, processedInput.trim(), {}, 'google_drive');
-          setMessages(prev => [...prev, { role: 'assistant', content: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]);
+          setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('google_drive', result) }]);
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Drive command.' }]);
         }
@@ -408,7 +409,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         }
         try {
           const result = await runMCPCommand(server.apiUrl, googleToken, gmailCmd, {}, 'gmail');
-          setMessages(prev => [...prev, { role: 'assistant', content: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]);
+          setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('gmail', result) }]);
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Gmail command.' }]);
         }

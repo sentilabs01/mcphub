@@ -8,7 +8,7 @@ export const ServerStatusIndicator: React.FC = () => {
     let isMounted = true;
     const checkServer = async () => {
       try {
-        const res = await fetch('http://localhost:3001/api/health', { method: 'GET' });
+        const res = await fetch('/api/health', { method: 'GET' });
         if (isMounted) setOnline(res.ok);
       } catch {
         if (isMounted) setOnline(false);
