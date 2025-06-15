@@ -22,6 +22,7 @@ import { runMCPCommand, fetchMCPCommands } from '../../services/mcpApiService';
 import { jwtDecode } from 'jwt-decode';
 import { getUserIntegrationAccounts } from '../../services/userIntegrationAccountsService';
 import { prettyPrintResult } from '../../utils/prettyPrint';
+import { getCredential } from '../../services/credentialsService';
 
 const PROVIDER_OPTIONS: { label: string; value: LLMProvider }[] = [
   { label: 'OpenAI', value: 'openai' },
@@ -263,8 +264,13 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           if (mcpServer && mcpServer.apiUrl) {
             // Determine token for provider when required (best-effort)
             let token = '';
-            if (providerKey === 'github') token = localStorage.getItem('github_token') || '';
-            else if (providerKey === 'openai') token = localStorage.getItem('openai_token') || '';
+            if (providerKey === 'github') {
+              token = localStorage.getItem('github_token') || '';
+              if (!token && user) {
+                const rec = await getCredential(user.id, 'github');
+                token = rec?.credentials?.token || '';
+              }
+            } else if (providerKey === 'openai') token = localStorage.getItem('openai_token') || '';
             else if (providerKey === 'anthropic') token = localStorage.getItem('anthropic_token') || '';
             else if (providerKey === 'google_drive') token = googleToken;
             else if (providerKey === 'gmail') token = googleToken;
@@ -346,7 +352,11 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         // Convert common phrases to kebab-case slugs expected by MCP server
         cleanCmd = cleanCmd.replace(/\s+/g, '-');
         // Use MCP protocol for GitHub commands
-        const githubToken = localStorage.getItem('github_token') || '';
+        let githubToken = localStorage.getItem('github_token') || '';
+        if (!githubToken && user) {
+          const rec = await getCredential(user.id, 'github');
+          githubToken = rec?.credentials?.token || '';
+        }
         if (!githubToken) {
           setMessages(prev => [...prev, { role: 'assistant', content: 'Please enter your GitHub Personal Access Token in the Integrations panel.' }]);
           setLoading(false);

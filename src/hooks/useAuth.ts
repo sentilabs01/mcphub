@@ -42,7 +42,37 @@ export const useAuthProvider = () => {
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    // Refresh Google provider_token ~2 min before expiry
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = (sess: Session | null) => {
+      if (!sess?.expires_at) return;
+      const msUntilRefresh = (sess.expires_at * 1000) - Date.now() - 2 * 60 * 1000; // 2 min before
+      if (msUntilRefresh <= 0) return;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(async () => {
+        try {
+          const { data, error } = await supabase.auth.refreshSession();
+          if (!error && data.session) {
+            setSession(data.session);
+            // Keep Google provider token in localStorage for drive/gmail helpers
+            if (data.session.provider_token)
+              localStorage.setItem('googleToken', data.session.provider_token);
+          }
+        } catch {
+          /* refresh failed – user will be prompted on next request */
+        } finally {
+          const { data: latest } = await supabase.auth.getSession();
+          scheduleRefresh(latest.session);
+        }
+      }, msUntilRefresh);
+    };
+
+    scheduleRefresh(session);
+
+    return () => {
+      subscription.unsubscribe();
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
   }, []);
 
   const signInWithGoogle = async () => {
