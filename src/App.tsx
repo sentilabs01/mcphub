@@ -14,6 +14,8 @@ import { CarouselDemo } from './components/ui/carousel-demo';
 import { Avatar, AvatarImage } from './components/ui/avatar';
 import Draggable from 'react-draggable';
 import { Resizable } from 're-resizable';
+import { ServerStatusIndicator } from './components/ui/ServerStatusIndicator';
+// import { EnhancedChatUI } from './components/ui/EnhancedChatUI';
 // import { useAuth } from './hooks/useAuth';
 // import { AuthModal } from './components/auth/AuthModal';
 // import { ChatBar } from './components/ui/ChatBar';
@@ -51,7 +53,11 @@ function MinimalAppContent() {
   }, [chatMinimized]);
 
   React.useEffect(() => {
-    document.body.className = darkMode ? 'dark' : '';
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
     localStorage.setItem('darkMode', darkMode ? 'true' : 'false');
   }, [darkMode]);
 
@@ -62,7 +68,7 @@ function MinimalAppContent() {
   if (!user) {
     return (
       <>
-        <div className={`min-h-screen flex flex-col items-start ${darkMode ? 'bg-black' : 'bg-gray-50'}`}>
+        <div className={`min-h-screen flex flex-col ${darkMode ? 'bg-black' : 'bg-gray-50'}`}>
           <div className="absolute top-4 right-4 flex space-x-2">
             <Button
               onClick={() => setAuthModalOpen(true)}
@@ -81,8 +87,8 @@ function MinimalAppContent() {
               <span className="sr-only">Toggle dark mode</span>
             </Button>
           </div>
-          <div className="w-full max-w-4xl mx-auto">
-            <CarouselDemo />
+          <div className="w-full px-6 lg:pl-20 text-left flex flex-col items-start">
+            <CarouselDemo darkMode={darkMode} />
           </div>
         </div>
         <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
@@ -91,8 +97,9 @@ function MinimalAppContent() {
   }
 
   return (
-    <div className={`min-h-screen flex flex-col items-center justify-start py-12 ${darkMode ? 'bg-black text-white' : 'bg-gray-50 text-black'}`}>
+    <div className={`min-h-[100vh] h-auto w-full flex flex-col items-center justify-start py-12 bg-white dark:bg-black ${darkMode ? 'text-white' : 'text-black'}`}>
       <div className="absolute top-4 right-4 flex space-x-2 items-center z-50">
+        <ServerStatusIndicator />
         <Button
           variant="ghost"
           onClick={() => setDarkMode(dm => !dm)}
@@ -122,14 +129,22 @@ function MinimalAppContent() {
         </div>
       </div>
       {/* Carousel as background */}
-      <div className="fixed inset-0 w-full h-[320px] z-0 pointer-events-none select-none">
-        <CarouselDemo />
+      <div className="fixed inset-0 w-full h-[320px] z-0 select-none bg-transparent">
+        <CarouselDemo darkMode={darkMode} />
       </div>
       {/* Main content (can be empty or minimal) */}
       <div className="relative z-10 w-full min-h-[320px]" />
+
       {/* Chat bar as draggable and resizable, only if not minimized */}
       {!chatMinimized && (
-        <Draggable defaultPosition={{x: 40, y: window.innerHeight - 300}} bounds="body" handle=".chatbar-drag-handle">
+        <Draggable
+          defaultPosition={{
+            x: typeof window !== 'undefined' ? (window.innerWidth - chatBoxSize.width) / 2 : 0,
+            y: 40
+          }}
+          bounds="body"
+          handle=".chatbar-drag-handle"
+        >
           <Resizable
             size={chatBoxSize}
             onResizeStop={(e, direction, ref, d) => {
@@ -174,6 +189,7 @@ function MinimalAppContent() {
           </Resizable>
         </Draggable>
       )}
+
       <div className="w-full max-w-2xl mx-auto">
         <IntegrationsGallery darkMode={darkMode} />
       </div>

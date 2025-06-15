@@ -9,6 +9,10 @@ import { fetchMCPCommands, runMCPCommand } from '../../services/mcpApiService';
 import { jwtDecode } from 'jwt-decode';
 import { useAuth } from '../../hooks/useAuth';
 import { GoogleLogin } from '@react-oauth/google';
+import { verifyGithubToken } from '../../services/githubService';
+import { getCredential, saveCredential, deleteCredential } from '../../services/credentialsService';
+import { validateZapierApiKey } from '../../services/zapierService';
+import { validateOpenAIApiKey } from '../../services/openaiService';
 
 interface ProviderPortalModalProps {
   isOpen: boolean;
@@ -55,6 +59,18 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
   // Remove local drive/gmail state, use Supabase session
   const googleAccessToken = session?.provider_token || '';
   const userEmail = user?.email || '';
+
+  if (!user) {
+    return isOpen ? (
+      <div className="fixed inset-0 flex items-center justify-center z-[999] bg-black/40" onClick={onClose}>
+        <div className={`bg-${darkMode ? 'zinc-900' : 'white'} rounded-lg p-6 w-[320px] text-center`} onClick={e => e.stopPropagation()}>
+          <h2 className="text-lg font-semibold mb-2">Please sign in</h2>
+          <p className="text-sm mb-4">Login to manage {provider?.name || 'this integration'}.</p>
+          <Button onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    ) : null;
+  }
 
   useEffect(() => {
     if (isOpen && provider) {
@@ -106,7 +122,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
 
   useEffect(() => {
     if (isOpen && provider && provider.id === 'github') {
-      const stored = localStorage.getItem('githubToken') || '';
+      const stored = localStorage.getItem('github_token') || '';
       setGithubToken(stored);
       setGithubTokenSaved(!!stored);
     }
@@ -119,27 +135,26 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
 
   // Check connection status on open
   useEffect(() => {
+    const authenticated = !!user;
     if (provider?.id === 'google_drive') {
-      const token = localStorage.getItem('googleToken');
-      if (token) {
-        setDriveConnected(true);
-        // Optionally fetch and set driveEmail here
+      if (authenticated) {
+        const token = localStorage.getItem('googleToken');
+        setDriveConnected(!!token);
       } else {
         setDriveConnected(false);
-        setDriveEmail('');
       }
+      if (!authenticated) setDriveEmail('');
     }
     if (provider?.id === 'gmail') {
-      const token = localStorage.getItem('gmailToken');
-      if (token) {
-        setGmailConnected(true);
-        // Optionally fetch and set gmailEmail here
+      if (authenticated) {
+        const token = localStorage.getItem('gmailToken');
+        setGmailConnected(!!token);
       } else {
         setGmailConnected(false);
-        setGmailEmail('');
       }
+      if (!authenticated) setGmailEmail('');
     }
-  }, [provider, isOpen]);
+  }, [provider, isOpen, user]);
 
   const handleRunCommand = async () => {
     if (!server || !server.apiUrl || !commandInput.trim() || !provider) return;
@@ -154,7 +169,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
       userToken = localStorage.getItem('anthropic_token') || '';
     }
     try {
-      const result = await runMCPCommand(server.apiUrl, userToken, commandInput.trim(), {}, provider);
+      const result = await runMCPCommand(server.apiUrl, userToken, commandInput.trim(), {}, provider.id);
       setCommandResult(typeof result === 'string' ? result : JSON.stringify(result, null, 2));
     } catch (err: any) {
       setCommandError(err.message || 'Failed to run command');
@@ -186,20 +201,15 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
     setOpenAITesting(true);
     setOpenAIFeedback(null);
     try {
-      // Find the OpenAI MCP server
-      const server = await MCPServerService.getServerById('openai');
-      console.log('Fetched server:', server); // DEBUG LOG
-      if (!server || !server.apiUrl) {
-        setOpenAIFeedback('OpenAI MCP server not found.');
-        setOpenAITesting(false);
-        return;
-      }
-      // Use a simple prompt for testing
-      const result = await runMCPCommand(server.apiUrl, openAIApiKey, 'Say hello!', {}, 'openai');
-      if (result && (result.reply || result.output)) {
-        setOpenAIFeedback('API key is valid!');
+      const status = await validateOpenAIApiKey(openAIApiKey);
+      if (status === 'valid') {
+        setOpenAIFeedback('API key is valid ✅');
+      } else if (status === 'quota_exceeded') {
+        setOpenAIFeedback('Key is valid but your OpenAI quota is exhausted. Check billing.');
+      } else if (status === 'invalid') {
+        setOpenAIFeedback('OpenAI rejected this key.');
       } else {
-        setOpenAIFeedback('API key test failed: No reply from server.');
+        setOpenAIFeedback('Unable to verify key (network or unknown error).');
       }
     } catch (err: any) {
       setOpenAIFeedback('API key test failed: ' + (err.message || 'Unknown error'));
@@ -242,17 +252,21 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
     setGmailEmail('');
   };
 
-  const handleSaveGithubToken = () => {
-    localStorage.setItem('githubToken', githubToken);
-    setGithubTokenSaved(true);
-    setGithubFeedback('Token saved successfully!');
-    const stored = localStorage.getItem('githubToken') || '';
-    setGithubToken(stored);
+  const handleSaveGithubToken = async () => {
+    if (!user) return;
+    const ok = await saveCredential(user.id, 'github', { token: githubToken });
+    if (ok) {
+      setGithubTokenSaved(true);
+      setGithubFeedback('Token saved successfully!');
+    } else {
+      setGithubFeedback('Failed to save token');
+    }
     setTimeout(() => setGithubFeedback(null), 2000);
   };
 
-  const handleRemoveGithubToken = () => {
-    localStorage.removeItem('githubToken');
+  const handleRemoveGithubToken = async () => {
+    if (!user) return;
+    await deleteCredential(user.id, 'github');
     setGithubToken('');
     setGithubTokenSaved(false);
     setGithubFeedback('Token removed.');
@@ -263,17 +277,11 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
     setGithubTesting(true);
     setGithubFeedback(null);
     try {
-      const server = await MCPServerService.getServerById('github');
-      if (!server || !server.apiUrl) {
-        setGithubFeedback('GitHub MCP server not found.');
-        setGithubTesting(false);
-        return;
-      }
-      const result = await runMCPCommand(server.apiUrl, githubToken, 'Test authentication', {}, 'github');
-      if (result && result.reply) {
-        setGithubFeedback('Token is valid!');
+      const user = await verifyGithubToken(githubToken);
+      if (user && user.login) {
+        setGithubFeedback(`Token is valid for @${user.login}!`);
       } else {
-        setGithubFeedback('Token test failed: No reply from server.');
+        setGithubFeedback('Token verification returned no user data.');
       }
     } catch (err: any) {
       setGithubFeedback('Token test failed: ' + (err.message || 'Unknown error'));
@@ -286,18 +294,24 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
   if (!isOpen || !provider) return null;
 
   return (
-    <div className={`fixed inset-0 ${darkMode ? 'bg-black bg-opacity-80' : 'bg-black bg-opacity-50'} backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200`}>
-      <Card className={`w-full max-w-lg relative animate-in slide-in-from-bottom-4 duration-300 ${darkMode ? 'bg-[#18181b] border-zinc-700 text-white' : ''}`}>
+    <div
+      className={`fixed inset-0 ${darkMode ? 'bg-black bg-opacity-80' : 'bg-black bg-opacity-50'} backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200`}
+      onClick={onClose}
+    >
+      <Card
+        className={`w-full max-w-lg relative animate-in slide-in-from-bottom-4 duration-300 ${darkMode ? 'bg-[#18181b] border-zinc-700 text-white' : ''}`}
+        onClick={e => e.stopPropagation()}
+      >
         <button
-          onClick={onClose}
-          className={`absolute top-4 right-4 ${darkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-400 hover:text-gray-600'} transition-colors`}
+          onClick={(e) => { e.stopPropagation(); onClose(); }}
+          className={`absolute top-4 right-4 ${darkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-400 hover:text-gray-600'} transition-colors cursor-pointer`}
         >
           <X className="w-5 h-5" />
         </button>
         <CardContent className="p-8">
           {/* Header */}
           <div className="flex flex-col items-center mb-6">
-            <img src={provider.logo} alt={provider.name} className="w-16 h-16 rounded-xl mb-2" />
+            <img src={darkMode && provider.logoDark ? provider.logoDark : provider.logo} alt={provider.name} className="w-16 h-16 rounded-xl mb-2" />
             <h2 className="text-xl font-bold mb-1">{provider.name} Portal</h2>
             {loading && <span className={`text-xs ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Loading MCP server info...</span>}
             {error && <span className="text-xs text-red-500">{error}</span>}
@@ -317,8 +331,8 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
               ) : (
                 <ul className={`list-disc list-inside text-sm ${darkMode ? 'text-zinc-200' : 'text-gray-700'} space-y-1`}>
                   {liveCommands.length > 0 ? (
-                    liveCommands.map((cmd, i) => (
-                      <li key={i}>/{provider.id} {cmd}</li>
+                    liveCommands.map((cmd: any, i: number) => (
+                      <li key={i}>/{provider.id} {typeof cmd === 'string' ? cmd : cmd.name || JSON.stringify(cmd)}</li>
                     ))
                   ) : (
                     <li>No live commands found.</li>
@@ -353,7 +367,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
                     {openAIApiKeySaved ? 'Saved' : 'Save'}
                   </Button>
                   {openAIApiKeySaved && (
-                    <Button onClick={handleRemoveOpenAIApiKey} variant="danger" size="sm">Remove</Button>
+                    <Button onClick={handleRemoveOpenAIApiKey} variant="destructive" size="sm">Remove</Button>
                   )}
                   <Button onClick={handleTestOpenAIApiKey} disabled={!openAIApiKey || openAITesting} size="sm" variant="secondary">
                     {openAITesting ? 'Testing...' : 'Test Key'}
@@ -369,35 +383,25 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
             ) : provider.id === 'gemini' ? (
               <GeminiKeyManager darkMode={darkMode} feedback={geminiFeedback} setFeedback={setGeminiFeedback} testing={geminiTesting} setTesting={setGeminiTesting} />
             ) : provider.id === 'google_drive' ? (
-              <DriveOAuthManager darkMode={darkMode} />
+              googleAccessToken ? (
+                <span className="text-xs text-green-500">Connected as {userEmail || 'Google user'} via Supabase login</span>
+              ) : (
+                <span className="text-xs text-yellow-500">Not connected. Sign in first.</span>
+              )
             ) : provider.id === 'gmail' ? (
-              <GmailOAuthManager darkMode={darkMode} />
+              googleAccessToken ? (
+                <span className="text-xs text-green-500">Connected as {userEmail || 'Gmail user'} via Supabase login</span>
+              ) : (
+                <span className="text-xs text-yellow-500">Not connected. Sign in first.</span>
+              )
+            ) : provider.id === 'zapier' || provider.id === 'zapier_cli' ? (
+              <ZapierKeyManager darkMode={darkMode} />
+            ) : provider.id === 'n8n' ? (
+              <N8nKeyManager darkMode={darkMode} />
+            ) : provider.id === 'make_com' ? (
+              <MakeKeyManager darkMode={darkMode} />
             ) : (
               <div className={`text-xs ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Account management UI coming soon.</div>
-            )}
-            {provider.id === 'google_drive' && (
-              <div className="flex flex-col space-y-2">
-                {googleAccessToken ? (
-                  <>
-                    <span className="text-xs text-green-500">Connected as {userEmail || 'Google user'}</span>
-                    <span className="text-xs text-gray-500">Using your main Google sign-in for Drive access.</span>
-                  </>
-                ) : (
-                  <span className="text-xs text-red-500">Sign in with Google above to connect Drive.</span>
-                )}
-              </div>
-            )}
-            {provider.id === 'gmail' && (
-              <div className="flex flex-col space-y-2">
-                {googleAccessToken ? (
-                  <>
-                    <span className="text-xs text-green-500">Connected as {userEmail || 'Gmail user'}</span>
-                    <span className="text-xs text-gray-500">Using your main Google sign-in for Gmail access.</span>
-                  </>
-                ) : (
-                  <span className="text-xs text-red-500">Sign in with Google above to connect Gmail.</span>
-                )}
-              </div>
             )}
             {provider.id === 'github' ? (
               <GithubKeyManager
@@ -407,9 +411,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
                 testing={githubTesting}
                 setTesting={setGithubTesting}
               />
-            ) : (
-              <div className={`text-xs ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Account management UI coming soon.</div>
-            )}
+            ) : null}
           </div>
 
           {/* Status/Error Section */}
@@ -423,6 +425,12 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
               <div className={`text-xs mt-1 ${geminiFeedback ? (geminiFeedback.includes('valid') ? 'text-green-600' : 'text-red-500') : (darkMode ? 'text-zinc-400' : 'text-gray-400')}`}>{geminiFeedback || 'No recent status.'}</div>
             ) : provider.id === 'github' ? (
               <div className={`text-xs mt-1 ${githubFeedback ? (githubFeedback.includes('valid') ? 'text-green-600' : 'text-red-500') : (darkMode ? 'text-zinc-400' : 'text-gray-400')}`}>{githubFeedback || 'No recent status.'}</div>
+            ) : provider.id === 'n8n' ? (
+              <div className={`text-xs mt-1 ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Credentials stored locally.</div>
+            ) : provider.id === 'make_com' ? (
+              <div className={`text-xs mt-1 ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Credentials stored locally.</div>
+            ) : provider.id === 'zapier' || provider.id === 'zapier_cli' ? (
+              <div className={`text-xs mt-1 ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Credentials stored locally.</div>
             ) : (
               <div className={`text-xs ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>No recent status.</div>
             )}
@@ -502,7 +510,7 @@ const AnthropicKeyManager: React.FC<{ darkMode?: boolean, feedback: string | nul
           {anthropicKeySaved ? 'Saved' : 'Save'}
         </Button>
         {anthropicKeySaved && (
-          <Button onClick={handleRemove} variant="danger" size="sm">Remove</Button>
+          <Button onClick={handleRemove} variant="destructive" size="sm">Remove</Button>
         )}
         <Button onClick={handleTest} disabled={!anthropicKey || testing} size="sm" variant="secondary">
           {testing ? 'Testing...' : 'Test Key'}
@@ -585,7 +593,7 @@ const GeminiKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, 
           {geminiKeySaved ? 'Saved' : 'Save'}
         </Button>
         {geminiKeySaved && (
-          <Button onClick={handleRemove} variant="danger" size="sm">Remove</Button>
+          <Button onClick={handleRemove} variant="destructive" size="sm">Remove</Button>
         )}
         <Button onClick={handleTest} disabled={!geminiKey || testing} size="sm" variant="secondary">
           {testing ? 'Testing...' : 'Test Key'}
@@ -641,7 +649,7 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       {driveToken ? (
         <>
           <span className="text-xs text-green-500">Connected{driveEmail && ` as ${driveEmail}`}</span>
-          <Button onClick={handleDisconnect} variant="danger" size="sm">Disconnect</Button>
+          <Button onClick={handleDisconnect} variant="destructive" size="sm">Disconnect</Button>
         </>
       ) : (
         <GoogleLogin
@@ -698,7 +706,7 @@ const GmailOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       {gmailToken ? (
         <>
           <span className="text-xs text-green-500">Connected{gmailEmail && ` as ${gmailEmail}`}</span>
-          <Button onClick={handleDisconnect} variant="danger" size="sm">Disconnect</Button>
+          <Button onClick={handleDisconnect} variant="destructive" size="sm">Disconnect</Button>
         </>
       ) : (
         <GoogleLogin
@@ -716,23 +724,42 @@ const GmailOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 const GithubKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, setFeedback: (msg: string | null) => void, testing: boolean, setTesting: (b: boolean) => void }> = ({ darkMode, feedback, setFeedback, testing, setTesting }) => {
   const [githubToken, setGithubToken] = React.useState('');
   const [githubTokenSaved, setGithubTokenSaved] = React.useState(false);
+  const { user } = useAuth();
 
+  // Load from Supabase (and migrate legacy localStorage)
   React.useEffect(() => {
-    const stored = localStorage.getItem('github_token') || '';
-    setGithubToken(stored);
-    setGithubTokenSaved(!!stored);
-  }, []);
+    if (!user) return;
 
-  const handleSave = () => {
-    localStorage.setItem('github_token', githubToken);
-    setGithubTokenSaved(true);
-    setFeedback('Token saved successfully!');
-    setGithubToken(localStorage.getItem('github_token') || '');
+    (async () => {
+      // Migration: if old token in localStorage, push to Supabase once
+      const legacy = localStorage.getItem('github_token');
+      if (legacy) {
+        await saveCredential(user.id, 'github', { token: legacy });
+        localStorage.removeItem('github_token');
+      }
+
+      const rec = await getCredential(user.id, 'github');
+      const token = rec?.credentials?.token || '';
+      setGithubToken(token);
+      setGithubTokenSaved(!!token);
+    })();
+  }, [user]);
+
+  const handleSave = async () => {
+    if (!user) return;
+    const ok = await saveCredential(user.id, 'github', { token: githubToken });
+    if (ok) {
+      setGithubTokenSaved(true);
+      setFeedback('Token saved successfully!');
+    } else {
+      setFeedback('Failed to save token');
+    }
     setTimeout(() => setFeedback(null), 2000);
   };
 
-  const handleRemove = () => {
-    localStorage.removeItem('github_token');
+  const handleRemove = async () => {
+    if (!user) return;
+    await deleteCredential(user.id, 'github');
     setGithubToken('');
     setGithubTokenSaved(false);
     setFeedback('Token removed.');
@@ -743,20 +770,11 @@ const GithubKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, 
     setTesting(true);
     setFeedback(null);
     try {
-      const { MCPServerService } = await import('../../services/mcpServerService');
-      const { runMCPCommand } = await import('../../services/mcpApiService');
-      const server = await MCPServerService.getServerById('github');
-      if (!server || !server.apiUrl) {
-        setFeedback('GitHub MCP server not found.');
-        setTesting(false);
-        return;
-      }
-      const result = await runMCPCommand(server.apiUrl, githubToken, 'Test token', {}, 'github');
-      // Accept output or login as valid
-      if (result && (result.output || result.login)) {
-        setFeedback('Token is valid!');
+      const user = await verifyGithubToken(githubToken);
+      if (user && user.login) {
+        setFeedback(`Token is valid for @${user.login}!`);
       } else {
-        setFeedback('Token test failed: No reply from server.');
+        setFeedback('Token verification returned no user data.');
       }
     } catch (err: any) {
       setFeedback('Token test failed: ' + (err.message || 'Unknown error'));
@@ -782,7 +800,7 @@ const GithubKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, 
           {githubTokenSaved ? 'Saved' : 'Save'}
         </Button>
         {githubTokenSaved && (
-          <Button onClick={handleRemove} variant="danger" size="sm">Remove</Button>
+          <Button onClick={handleRemove} variant="destructive" size="sm">Remove</Button>
         )}
         <Button onClick={handleTest} disabled={!githubToken || testing} size="sm" variant="secondary">
           {testing ? 'Testing...' : 'Test Token'}
@@ -792,6 +810,244 @@ const GithubKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, 
         <div className={`text-xs mt-1 ${feedback.includes('valid') ? 'text-green-600' : 'text-red-500'}`}>{feedback}</div>
       )}
       <span className="text-xs text-gray-500">Required for all GitHub commands. Your token is stored locally and never shared.</span>
+    </div>
+  );
+};
+
+const ZapierKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
+  const [apiKey, setApiKey] = React.useState('');
+  const [apiKeySaved, setApiKeySaved] = React.useState(false);
+  const [testing, setTesting] = React.useState(false);
+  const [feedback, setFeedback] = React.useState<string | null>(null);
+  const [baseUrl, setBaseUrl] = React.useState('');
+  const [privKey, setPrivKey] = React.useState('');
+  const [privSaved, setPrivSaved] = React.useState(false);
+  const { user } = useAuth();
+
+  React.useEffect(() => {
+    if (!user) return;
+    getCredential(user.id, 'zapier').then(rec => {
+      if (rec) {
+        setApiKey(rec.credentials.apiKey || '');
+        setApiKeySaved(true);
+      }
+    });
+    getCredential(user.id, 'zapier_cli').then(rec => {
+      if (rec) {
+        setBaseUrl(rec.credentials.baseUrl || '');
+        setPrivKey(rec.credentials.apiKey || '');
+        setPrivSaved(true);
+      }
+    });
+  }, [user]);
+
+  const saveApiKey = async () => {
+    if (!user) return;
+    await saveCredential(user.id, 'zapier', { apiKey });
+    setApiKeySaved(true);
+    setFeedback('Key saved!');
+  };
+
+  const removeApiKey = async () => {
+    if (!user) return;
+    await deleteCredential(user.id, 'zapier');
+    setApiKey('');
+    setApiKeySaved(false);
+    setFeedback('Key removed');
+  };
+
+  const savePriv = async () => {
+    if (!user) return;
+    await saveCredential(user.id, 'zapier_cli', { baseUrl, apiKey: privKey });
+    setPrivSaved(true);
+    setFeedback('Private app creds saved!');
+  };
+
+  const removePriv = async () => {
+    if (!user) return;
+    await deleteCredential(user.id, 'zapier_cli');
+    setBaseUrl('');
+    setPrivKey('');
+    setPrivSaved(false);
+    setFeedback('Private app creds removed');
+  };
+
+  // Call Zapier validation endpoint
+  const testApiKey = async () => {
+    setTesting(true);
+    setFeedback(null);
+    try {
+      const ok = await validateZapierApiKey(apiKey);
+      setFeedback(ok ? 'API key is valid ✅' : 'API key appears invalid');
+    } catch (err: any) {
+      setFeedback(err.message || 'Test failed');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col space-y-4">
+      {/* AI Actions Key */}
+      <div className="flex flex-col space-y-2">
+        <label className="text-xs font-medium">Zapier AI Actions API Key</label>
+        <input
+          type="password"
+          value={apiKey}
+          onChange={e => { setApiKey(e.target.value); setApiKeySaved(false); }}
+          placeholder="zapier_nla_key..."
+          className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+        />
+        <div className="flex items-center space-x-2">
+          <Button size="sm" onClick={saveApiKey} disabled={!apiKey || apiKeySaved}>Save</Button>
+          {apiKeySaved && (
+            <>
+              <Button size="sm" variant="secondary" onClick={testApiKey} disabled={testing}>{testing ? 'Testing…' : 'Test'}</Button>
+              <Button size="sm" variant="destructive" onClick={removeApiKey}>Remove</Button>
+            </>
+          )}
+        </div>
+        {feedback && <div className={`text-xs mt-1 ${feedback.includes('valid') ? 'text-green-600' : 'text-red-500'}`}>{feedback}</div>}
+        <span className="text-xs text-gray-500">Stored securely in Supabase – available on every login.</span>
+      </div>
+      {/* Private App creds */}
+      <div className="flex flex-col space-y-2">
+        <label className="text-xs font-medium">Private App Base URL</label>
+        <input
+          type="text"
+          value={baseUrl}
+          onChange={e => { setBaseUrl(e.target.value); setPrivSaved(false); setFeedback(null); }}
+          placeholder="https://api.my-mcp.com"
+          className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+        />
+        <label className="text-xs font-medium">Private App API Key (optional)</label>
+        <input
+          type="password"
+          value={privKey}
+          onChange={e => { setPrivKey(e.target.value); setPrivSaved(false); setFeedback(null); }}
+          placeholder="key..."
+          className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+        />
+        <div className="flex items-center space-x-2">
+          <Button size="sm" onClick={savePriv} disabled={!baseUrl || privSaved}>Save</Button>
+          {privSaved && <Button size="sm" variant="destructive" onClick={removePriv}>Remove</Button>}
+        </div>
+        <span className="text-xs text-gray-500">Used by the private Zapier connector. Stored securely in Supabase.</span>
+      </div>
+    </div>
+  );
+};
+
+const N8nKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
+  const [baseUrl, setBaseUrl] = React.useState('');
+  const [apiKey, setApiKey] = React.useState('');
+  const [saved, setSaved] = React.useState(false);
+  const { user } = useAuth();
+
+  React.useEffect(() => {
+    if (!user) return;
+    getCredential(user.id, 'n8n').then(rec => {
+      if (rec) {
+        setBaseUrl(rec.credentials.baseUrl || '');
+        setApiKey(rec.credentials.apiKey || '');
+        setSaved(true);
+      }
+    });
+  }, [user]);
+
+  const save = async () => {
+    if (!user) return;
+    await saveCredential(user.id, 'n8n', { baseUrl, apiKey });
+    setSaved(true);
+  };
+  const remove = async () => {
+    if (!user) return;
+    await deleteCredential(user.id, 'n8n');
+    setBaseUrl('');
+    setApiKey('');
+    setSaved(false);
+  };
+
+  return (
+    <div className="flex flex-col space-y-2">
+      <label className="text-xs font-medium">Base URL</label>
+      <input
+        type="text"
+        value={baseUrl}
+        onChange={e => { setBaseUrl(e.target.value); setSaved(false); }}
+        placeholder="https://api.my-mcp.com"
+        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+      />
+      <label className="text-xs font-medium">API Key (optional)</label>
+      <input
+        type="password"
+        value={apiKey}
+        onChange={e => { setApiKey(e.target.value); setSaved(false); }}
+        placeholder="key..."
+        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+      />
+      <div className="flex items-center space-x-2">
+        <Button size="sm" onClick={save} disabled={saved}>Save</Button>
+        {saved && <Button size="sm" variant="destructive" onClick={remove}>Remove</Button>}
+      </div>
+      <span className="text-xs text-gray-500">Only stored in this browser. Used by n8n custom node.</span>
+    </div>
+  );
+};
+
+const MakeKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
+  const [baseUrl, setBaseUrl] = React.useState('');
+  const [apiKey, setApiKey] = React.useState('');
+  const [saved, setSaved] = React.useState(false);
+  const { user } = useAuth();
+
+  React.useEffect(() => {
+    if (!user) return;
+    getCredential(user.id, 'make_com').then(rec => {
+      if (rec) {
+        setBaseUrl(rec.credentials.baseUrl || '');
+        setApiKey(rec.credentials.apiKey || '');
+        setSaved(true);
+      }
+    });
+  }, [user]);
+
+  const save = async () => {
+    if (!user) return;
+    await saveCredential(user.id, 'make_com', { baseUrl, apiKey });
+    setSaved(true);
+  };
+  const remove = async () => {
+    if (!user) return;
+    await deleteCredential(user.id, 'make_com');
+    setBaseUrl('');
+    setApiKey('');
+    setSaved(false);
+  };
+
+  return (
+    <div className="flex flex-col space-y-2">
+      <label className="text-xs font-medium">Base URL</label>
+      <input
+        type="text"
+        value={baseUrl}
+        onChange={e => { setBaseUrl(e.target.value); setSaved(false); }}
+        placeholder="https://api.my-mcp.com"
+        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+      />
+      <label className="text-xs font-medium">API Key (optional)</label>
+      <input
+        type="password"
+        value={apiKey}
+        onChange={e => { setApiKey(e.target.value); setSaved(false); }}
+        placeholder="key..."
+        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+      />
+      <div className="flex items-center space-x-2">
+        <Button size="sm" onClick={save} disabled={saved}>Save</Button>
+        {saved && <Button size="sm" variant="destructive" onClick={remove}>Remove</Button>}
+      </div>
+      <span className="text-xs text-gray-500">Stored only in this browser. Used by Make.com custom app.</span>
     </div>
   );
 }; 

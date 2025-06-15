@@ -180,4 +180,74 @@ For questions or support, contact [Senti Labs](https://sentilabs.com)
 
 ---
 
-For questions or support, contact [Senti Labs](https://sentilabs.com) 
+For questions or support, contact [Senti Labs](https://sentilabs.com)
+
+## Automation Connectors
+
+MCP-Hub now ships first-class workflow integrations:
+
+| Platform | Asset | How to install |
+|----------|-------|----------------|
+| Zapier (Private) | Internal invite link (ask Ops) | Accept invite → add to Zapier workspace |
+| Make.com | `public/integrations/makecom/mcp-app.json` | Make.com → Tools → Create → Import JSON |
+| n8n | `n8n-nodes-mcp` on NPM | `npm i n8n-nodes-mcp` inside your n8n instance, then restart |
+
+All three connectors share the same credentials: **Base URL** of your MCP server and optional **API Key**.
+
+### Local credentials UI
+Open the Integrations panel and pick the automation platform. Enter your Base URL (+ API Key if required) and click **Save Credentials** – they're stored in `localStorage` only.
+
+### New provider logos
+The carousel and provider portals are generated from `src/data/providers.ts`, so adding a new server entry automatically surfaces the logo, portal and commands.
+
+### Development tips
+* Vite 5 auto-pulls logos from `/public/logos`. Add both light & dark variants if needed.
+* Shims exist in `src/services/*/*.js` to forward named exports from TS files and avoid stale build artefacts.
+* Run `npm run dev -- --force` if you ever see "does not provide an export named…" – this clears Vite's module cache.
+
+## Zapier (AI Actions) Integration
+
+The UI supports slash‐commands for Zapier via the MCP gateway.
+
+1.  Make sure the MCP server exposes **POST /api/command** (or /command + alias) and implements a `zapier` provider branch.
+2.  Add / update the `zapier` row in Supabase `mcp_servers` so that the `apiurl` ends in `/api` (e.g. `http://localhost:3001/api`).
+3.  In the *Integrations* panel save your Zapier **AI Actions** key (`zapierApiKey`).
+4.  Use commands in chat:
+
+    ```text
+    /zapier list zaps
+    /zapier trigger zap <id>
+    ```
+
+## Storybook
+
+Storybook is available for rapid UI iteration of provider portals and common components.
+
+```bash
+# Start storybook on port 6006
+npm run storybook
+```
+
+If you add a new provider portal component place it under `src/components/ui/provider-portals/<ProviderName>.tsx` and ensure you export a `<ProviderName>Portal>` story.
+
+## Development quick-start
+
+```bash
+# 1.  Front-end
+npm install
+npm run dev        # localhost:5173
+
+# 2.  Local MCP gateway (optional stub)
+npm run api        # localhost:3001 (only needed if real MCP not running)
+```
+
+## Publishing
+
+This repo uses the standard GitHub flow:
+
+1.  Create a feature branch (`feat/zapier-support`).
+2.  Commit your changes, open a PR.
+3.  CI (GitHub Actions) will lint & type-check.
+4.  Merge to `main` after review.
+
+> **Tip**: The stub `server.js` is for local dev only – do **not** deploy it to production. Remove it from the branch if you are targeting the real MCP server. 

@@ -24,24 +24,37 @@ export interface CallLLMProviderParams {
 
 export async function callLLMProvider({ provider, messages, apiKeys, context }: CallLLMProviderParams): Promise<string> {
   if (provider === 'openai') {
-    // OpenAI Chat Completion via backend
-    const response = await fetch('http://localhost:3001/api/command', {
+    if (!apiKeys.openai) {
+      throw new Error('Missing OpenAI API key');
+    }
+
+    // Direct call to OpenAI Chat Completions – avoids MCP round-trip except when user explicitly triggers a /openai command.
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKeys.openai}`,
       },
       body: JSON.stringify({
-        provider: 'openai',
-        apiKey: apiKeys.openai,
-        prompt: messages[messages.length - 1]?.content || '',
-        command: 'chat',
-        messages,
+        model: (context?.model as string) || 'gpt-3.5-turbo',
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        temperature: context?.temperature ?? 0.7,
+        ...context?.extraParams,
       }),
     });
-    if (!response.ok) throw new Error('OpenAI API error');
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`OpenAI API error: ${errText}`);
+    }
+
     const data = await response.json();
-    // Return the backend's output field if present, otherwise fallback
-    return data.output || data.reply || data.choices?.[0]?.message?.content || 'No response from OpenAI.';
+    return (
+      data.choices?.[0]?.message?.content ||
+      data.output ||
+      data.reply ||
+      'No response from OpenAI.'
+    );
   }
 
   if (provider === 'anthropic') {
@@ -75,12 +88,7 @@ export async function callLLMProvider({ provider, messages, apiKeys, context }: 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [
-            ...(Array.isArray(messages)
-              ? messages.map(m => ({ role: m.role, parts: [{ text: m.content }] }))
-              : [{ role: 'user', parts: [{ text: messages[messages.length - 1]?.content || '' }] }]
-            )
-          ],
+          contents: messages.map(m => ({ role: m.role, parts: [{ text: m.content }] })),
           generationConfig: { maxOutputTokens: 256 }
         })
       }

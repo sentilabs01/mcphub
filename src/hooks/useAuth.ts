@@ -46,11 +46,15 @@ export const useAuthProvider = () => {
   }, []);
 
   const signInWithGoogle = async () => {
-    console.log('signInWithGoogle called');
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`
+        // full Gmail + Drive scopes
+        scopes:
+          'https://mail.google.com/ https://www.googleapis.com/auth/drive',
+        // force a fresh consent + refresh-token
+        queryParams: { access_type: 'offline', prompt: 'consent' },
+        redirectTo: `${window.location.origin}/auth/callback`,
       }
     });
     if (error) throw error;

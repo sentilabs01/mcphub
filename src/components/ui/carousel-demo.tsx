@@ -1,36 +1,13 @@
-import { AnimatedCarousel } from "./logo-carousel";
+import { MarqueeLogos } from './MarqueeLogos';
+import { PROVIDERS } from '../../data/providers';
 
-const partnerLogos = [
-  { src: "/logos/jupyter-notebook.png", alt: "Jupyter" },
-  { src: "/logos/clickhouse.svg", alt: "ClickHouse" },
-  { src: "/logos/Slack_icon_2019.svg.png", alt: "Slack" },
-  { src: "/logos/chroma-logo.png", alt: "Chroma" },
-  { src: "/logos/Figma-logo.svg", alt: "Figma" },
-  { src: "/logos/Brave_icon_lionface.png", alt: "Brave" },
-  { src: "/logos/gemini_icon-logo_brandlogos.net_bqzeu.png", alt: "Gemini" },
-  { src: "/logos/openai-icon-505x512-pr6amibw.png", alt: "OpenAI" },
-  { src: "/logos/anthropic-icon-tdvkiqisswbrmtkiygb0ia.webp", alt: "Anthropic" },
-  { src: "/logos/Octicons-mark-github.svg", alt: "GitHub" },
-  { src: "/logos/google-drive-icon-google-product-illustration-free-png.webp", alt: "Google Drive" },
-  { src: "/logos/zapier-logo-svg-vector.svg", alt: "Zapier" },
-  { src: "/logos/Gmail_icon_(2020).svg (1).webp", alt: "Gmail" },
-];
+const partnerLogos = PROVIDERS.map(p => ({ src: p.logo, alt: p.name }));
 
-export const CarouselDemo = () => {
+export const CarouselDemo = ({ darkMode }: { darkMode?: boolean }) => {
   return (
-    <div className="w-screen h-screen flex items-center justify-center">
-      <AnimatedCarousel 
-        title="Powering the Web"
-        logos={partnerLogos}
-        autoPlay={true}
-        autoPlayInterval={4000}
-        itemsPerViewMobile={3}
-        itemsPerViewDesktop={5}
-        logoContainerWidth="w-40"
-        logoContainerHeight="h-20"
-        logoImageWidth="w-auto"
-        logoImageHeight="h-10"
-      />
+    <div className="w-screen h-screen flex flex-col items-start justify-center">
+      <h2 className={`text-xl md:text-3xl md:text-5xl tracking-tighter lg:max-w-xl font-regular text-left ml-4 md:ml-12 lg:ml-20 ${darkMode ? 'text-white' : 'text-black'}`}>MCP Hub</h2>
+      <MarqueeLogos logos={partnerLogos} darkMode={darkMode} />
     </div>
   );
 }; 

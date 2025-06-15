@@ -18,8 +18,9 @@ import {
 import { useChatBarInput } from '../../context/ChatBarInputContext';
 import { PROVIDERS } from '../../data/providers';
 import { MCPServerService } from '../../services/mcpServerService';
-import { runMCPCommand } from '../../services/mcpApiService';
+import { runMCPCommand, fetchMCPCommands } from '../../services/mcpApiService';
 import { jwtDecode } from 'jwt-decode';
+import { getUserIntegrationAccounts } from '../../services/userIntegrationAccountsService';
 
 const PROVIDER_OPTIONS: { label: string; value: LLMProvider }[] = [
   { label: 'OpenAI', value: 'openai' },
@@ -55,24 +56,80 @@ function saveHistory(history: any) {
 }
 
 // Add a simple intent parser for GitHub
-function parseGithubIntent(input: string): string {
-  const lower = input.toLowerCase();
-  if (lower.includes('list repos') || lower.includes('show my repos')) return 'list repos';
-  const issuesMatch = lower.match(/list issues for ([\w-]+\/[\w-]+)/);
+function parseGithubIntent(input: string): string | null {
+  const lower = input.toLowerCase().trim();
+
+  // list repos commands
+  if (/^(list|get|show)\s+(my\s+)?repos?/.test(lower)) {
+    return 'list repos';
+  }
+
+  // list issues for owner/repo
+  const issuesMatch = lower.match(/(?:list|show)\s+(?:open\s+)?issues\s+for\s+([\w-]+\/[\w-]+)/);
   if (issuesMatch) {
     return `issues ${issuesMatch[1]}`;
   }
-  const createIssueMatch = lower.match(/create issue in ([\w-]+\/[\w-]+) titled "([^"]+)" with body "([^"]+)"/);
-  if (createIssueMatch) {
-    const [, repo, title, body] = createIssueMatch;
-    return `create issue ${repo} "${title}" "${body}"`;
-  }
-  const pullsMatch = lower.match(/list pull requests for ([\w-]+\/[\w-]+)/);
+
+  // list pulls for owner/repo
+  const pullsMatch = lower.match(/(?:list|show)\s+(?:open\s+)?(?:pull\s+requests|prs|pulls)\s+for\s+([\w-]+\/[\w-]+)/);
   if (pullsMatch) {
     return `pulls ${pullsMatch[1]}`;
   }
-  // Add more patterns as needed
-  return input; // fallback: send as-is
+
+  // create repo <name>
+  const createRepoMatch = lower.match(/create\s+(?:new\s+)?repo\s+(?:named\s+)?([\w-]+)/);
+  if (createRepoMatch) {
+    return `create repo ${createRepoMatch[1]}`;
+  }
+
+  // create issue pattern with optional body
+  const createIssueMatch = lower.match(/create\s+issue\s+in\s+([\w-]+\/[\w-]+)\s+titled\s+"([^"]+)"(?:\s+with\s+body\s+"([^"]+)")?/);
+  if (createIssueMatch) {
+    const [, repo, title, body] = createIssueMatch;
+    return body ? `create issue ${repo} "${title}" "${body}"` : `create issue ${repo} "${title}"`;
+  }
+
+  return null; // no intent recognised
+}
+
+// Simple intent parser for Google Drive
+function parseDriveIntent(input: string): string | null {
+  const lower = input.toLowerCase();
+  if (lower.includes('list drive files') || lower.includes('list my drive files')) return '/drive List files';
+  const uploadMatch = lower.match(/upload (.+) to drive/);
+  if (uploadMatch) {
+    return `/drive Upload ${uploadMatch[1]}`;
+  }
+  const downloadMatch = lower.match(/download (.+) from drive/);
+  if (downloadMatch) {
+    return `/drive Download ${downloadMatch[1]}`;
+  }
+  return null; // no intent found
+}
+
+// Simple intent parser for Gmail
+function parseGmailIntent(input: string): string | null {
+  const lower = input.toLowerCase().trim();
+
+  // list inbox / unread
+  if (/^(list|show|get)\s+(my\s+)?(inbox|emails|messages)(?:\s+unread)?/.test(lower)) {
+    return '/gmail List inbox';
+  }
+
+  // search emails with keyword
+  const searchMatch = lower.match(/search emails? for "([^"]+)"/);
+  if (searchMatch) {
+    return `/gmail Search emails "${searchMatch[1]}"`;
+  }
+
+  // send email to someone
+  const sendMatch = lower.match(/send email to ([^\s]+) subject "([^"]+)" body "([^"]+)"/);
+  if (sendMatch) {
+    const [, to, subject, body] = sendMatch;
+    return `/gmail Send email ${to} "${subject}" "${body}"`;
+  }
+
+  return null;
 }
 
 export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
@@ -87,10 +144,12 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const [showCommandSuggestions, setShowCommandSuggestions] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState<{ provider: string; command: string }[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
-  const googleToken = session?.provider_token || '';
+  const googleToken = session?.provider_token || (session as any)?.access_token || '';
   // Command history state
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  // Cache of live commands fetched from MCP servers { providerId -> commands[] }
+  const [liveCommandCache, setLiveCommandCache] = useState<Record<string, string[]>>({});
 
   // Load settings and history from Supabase or localStorage on mount
   useEffect(() => {
@@ -118,6 +177,28 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       }
     }
     loadUserData();
+
+    // Sync tokens from Supabase integration accounts to localStorage so the chat bar can use them without separate manual step
+    async function syncProviderTokens() {
+      if (!user) return;
+      try {
+        const accounts = await getUserIntegrationAccounts(user.id);
+        accounts.forEach((acc: any) => {
+          const creds: any = acc?.credentials || {};
+          const tok = creds.token || creds.apiKey || creds.api_key || '';
+          if (acc.provider && tok) {
+            if (acc.provider === 'zapier') {
+              localStorage.setItem('zapierApiKey', tok);
+            }
+            localStorage.setItem(`${acc.provider}_token`, tok);
+          }
+        });
+      } catch (err) {
+        console.warn('Could not sync provider tokens:', err);
+      }
+    }
+
+    syncProviderTokens();
     // eslint-disable-next-line
   }, [user]);
 
@@ -150,43 +231,119 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     }
   }, [messages]);
 
-  // Build all commands from PROVIDERS
-  const allCommands = PROVIDERS.flatMap((provider) =>
-    provider.commands.map((command) => ({ provider: provider.name, command: `/${provider.id} ${command}` }))
-  );
-
-  // Show suggestions when input starts with '/'
-  useEffect(() => {
-    if (input.startsWith('/')) {
-      const q = input.slice(1).toLowerCase();
-      setFilteredCommands(
-        allCommands.filter((c) => c.command.toLowerCase().includes(q))
-      );
-      setShowCommandSuggestions(true);
-    } else {
-      setShowCommandSuggestions(false);
+  // Build base commands list (static + live fetched ones)
+  const buildAllCommands = () => {
+    const result: { provider: string; command: string }[] = [];
+    for (const prov of PROVIDERS) {
+      const cmds = [...prov.commands, ...(liveCommandCache[prov.id] || [])];
+      for (const c of cmds) {
+        result.push({ provider: prov.name, command: `/${prov.id} ${c}` });
+      }
     }
-  }, [input]);
-
-  // Handle suggestion click
-  const handleSuggestionClick = (cmd: string) => {
-    setInput(cmd + ' ');
-    setShowCommandSuggestions(false);
-    inputRef.current?.focus();
+    return result;
   };
 
+  // Fetch live commands for provider prefix if necessary & filter suggestions
+  useEffect(() => {
+    if (!input.startsWith('/')) {
+      setShowCommandSuggestions(false);
+      return;
+    }
+
+    // Extract provider key (text between '/' and first space or end)
+    const match = input.match(/^\/([a-zA-Z0-9_\-]+)/);
+    const providerKey = match ? match[1] : '';
+
+    if (providerKey && !liveCommandCache[providerKey]) {
+      // Attempt to fetch live commands
+      (async () => {
+        try {
+          const mcpServer = await MCPServerService.getServerById(providerKey);
+          if (mcpServer && mcpServer.apiUrl) {
+            // Determine token for provider when required (best-effort)
+            let token = '';
+            if (providerKey === 'github') token = localStorage.getItem('github_token') || '';
+            else if (providerKey === 'openai') token = localStorage.getItem('openai_token') || '';
+            else if (providerKey === 'anthropic') token = localStorage.getItem('anthropic_token') || '';
+            else if (providerKey === 'google_drive') token = googleToken;
+            else if (providerKey === 'gmail') token = googleToken;
+
+            const cmds = await fetchMCPCommands(mcpServer.apiUrl, token);
+            if (Array.isArray(cmds) && cmds.length > 0) {
+              const normalised = cmds.map((c: any) => {
+                if (typeof c === 'string') return c.trim();
+                if (c && typeof c === 'object') {
+                  return (c.id || c.name || '').toString().trim();
+                }
+                return '';
+              }).filter(Boolean);
+              if (normalised.length > 0) {
+                setLiveCommandCache(prev => ({ ...prev, [providerKey]: normalised }));
+              }
+            }
+          }
+        } catch (_) {
+          /* silent */
+        }
+      })();
+    }
+
+    const q = input.slice(1).toLowerCase();
+    setFilteredCommands(
+      buildAllCommands().filter((c) => c.command.toLowerCase().includes(q))
+    );
+    setShowCommandSuggestions(true);
+  }, [input, liveCommandCache]);
+
+  // Persist command history per provider in localStorage for quick recall
+  const HISTORY_KEY = `mcp_history_${provider}`;
+
+  // Load history on provider change
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+      setCommandHistory(Array.isArray(stored) ? stored : []);
+    } catch {
+      setCommandHistory([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider]);
+
   const handleSend = async () => {
+    if (loading) return; // prevent accidental double submission
     if (!input.trim()) return;
-    setCommandHistory(prev => [...prev, input]);
+    let processedInput = input;
+    // Generic: if user typed a command slug without leading /provider, prepend automatically
+    if (!processedInput.startsWith('/')) {
+      const maybeCmd = processedInput.toLowerCase().trim().replace(/\s+/g, '-');
+      const matchProv = PROVIDERS.find(p => p.commands.includes(maybeCmd));
+      if (matchProv) {
+        processedInput = `/${matchProv.id} ${maybeCmd}`;
+      }
+    }
+    // Drive & Gmail intent detection
+    const maybeDrive = parseDriveIntent(processedInput);
+    if (maybeDrive) processedInput = maybeDrive;
+    const maybeGmail = parseGmailIntent(processedInput);
+    if (maybeGmail) processedInput = maybeGmail;
+    setCommandHistory(prev => {
+      const next = [...prev, processedInput].slice(-50); // cap at 50
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
     setHistoryIndex(null);
-    setMessages([...messages, { role: 'user', content: input }]);
+    setMessages([...messages, { role: 'user', content: processedInput }]);
     setInput('');
     setLoading(true);
     setError(null);
     try {
       // --- GitHub Chat Commands ---
-      if (provider === 'github' || input.startsWith('/github')) {
-        const parsed = parseGithubIntent(input);
+      const githubIntent = parseGithubIntent(processedInput);
+      if (processedInput.startsWith('/github') || githubIntent) {
+        const rawCmd = processedInput.startsWith('/github') ? processedInput : (githubIntent as string);
+        let cleanCmd = rawCmd.replace(/^\/github\s*/i, '').toLowerCase().trim();
+        // Convert common phrases to kebab-case slugs expected by MCP server
+        cleanCmd = cleanCmd.replace(/\s+/g, '-');
         // Use MCP protocol for GitHub commands
         const githubToken = localStorage.getItem('github_token') || '';
         if (!githubToken) {
@@ -202,7 +359,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           return;
         }
         try {
-          const result = await runMCPCommand(server.apiUrl, githubToken, parsed, {});
+          const result = await runMCPCommand(server.apiUrl, githubToken, cleanCmd, {}, 'github');
           setMessages(prev => [...prev, { role: 'assistant', content: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]);
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run GitHub command.' }]);
@@ -212,12 +369,8 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       }
       // --- End GitHub Chat Commands ---
       // --- Google Drive Chat Commands ---
-      if (input.startsWith('/drive')) {
-        if (!googleToken) {
-          setMessages(prev => [...prev, { role: 'assistant', content: 'Please sign in with Google to use Drive commands.' }]);
-          setLoading(false);
-          return;
-        }
+      if (processedInput.startsWith('/drive') || processedInput.startsWith('/google_drive')) {
+        // Use Supabase Google token if available; proceed even if missing (public endpoints may not need it)
         // Route to MCP server for Drive
         const server = await MCPServerService.getServerById('google_drive');
         if (!server || !server.apiUrl) {
@@ -226,7 +379,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           return;
         }
         try {
-          const result = await runMCPCommand(server.apiUrl, googleToken, input.trim(), {});
+          const result = await runMCPCommand(server.apiUrl, googleToken, processedInput.trim(), {}, 'google_drive');
           setMessages(prev => [...prev, { role: 'assistant', content: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]);
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Drive command.' }]);
@@ -235,12 +388,17 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         return;
       }
       // --- Gmail Chat Commands ---
-      if (input.startsWith('/gmail')) {
-        if (!googleToken) {
-          setMessages(prev => [...prev, { role: 'assistant', content: 'Please sign in with Google to use Gmail commands.' }]);
-          setLoading(false);
-          return;
+      if (processedInput.startsWith('/gmail') || maybeGmail) {
+        const rawGmail = processedInput.startsWith('/gmail') ? processedInput : (maybeGmail || processedInput);
+        const cleanGmailCmd = rawGmail.replace(/^\/gmail\s*/i, '').trim().toLowerCase();
+        // Map common aliases to canonical backend commands
+        let gmailCmd = cleanGmailCmd;
+        if (gmailCmd === 'list inbox' || gmailCmd === 'list emails' || gmailCmd === 'list messages') {
+          gmailCmd = 'list-messages';
         }
+        // More mappings can be added here (e.g., send email, get message)
+
+        // Proceed even if googleToken empty
         // Route to MCP server for Gmail
         const server = await MCPServerService.getServerById('gmail');
         if (!server || !server.apiUrl) {
@@ -249,7 +407,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           return;
         }
         try {
-          const result = await runMCPCommand(server.apiUrl, googleToken, input.trim(), {});
+          const result = await runMCPCommand(server.apiUrl, googleToken, gmailCmd, {}, 'gmail');
           setMessages(prev => [...prev, { role: 'assistant', content: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]);
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Gmail command.' }]);
@@ -257,9 +415,37 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         setLoading(false);
         return;
       }
+      // --- Zapier Chat Commands (AI Actions / NLA) ---
+      if (processedInput.startsWith('/zapier')) {
+        const cleanZapierCmdRaw = processedInput.replace(/^\/zapier\s*/i, '').trim();
+        // Backend expects kebab-case slugs (e.g. list-zaps, trigger-zap-<id>)
+        const cleanZapierCmd = cleanZapierCmdRaw.toLowerCase().replace(/\s+/g, '-');
+        const zapierToken = localStorage.getItem('zapierApiKey') || localStorage.getItem('zapier_token') || '';
+        if (!zapierToken) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Please enter your Zapier API Key in the Integrations panel.' }]);
+          setLoading(false);
+          return;
+        }
+
+        // Route to MCP server for Zapier (NLA)
+        const server = await MCPServerService.getServerById('zapier');
+        if (!server || !server.apiUrl) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Zapier MCP server not found.' }]);
+          setLoading(false);
+          return;
+        }
+        try {
+          const result = await runMCPCommand(server.apiUrl, zapierToken, cleanZapierCmd, {}, 'zapier');
+          setMessages(prev => [...prev, { role: 'assistant', content: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]);
+        } catch (err: any) {
+          setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Zapier command.' }]);
+        }
+        setLoading(false);
+        return;
+      }
       // --- End Google Drive Chat Commands ---
       // --- OpenAI MCP Command Routing ---
-      if (input.startsWith('/openai')) {
+      if (processedInput.startsWith('/openai')) {
         // Use MCP protocol for OpenAI commands
         const openaiToken = localStorage.getItem('openai_token') || '';
         if (!openaiToken) {
@@ -275,7 +461,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           return;
         }
         try {
-          const result = await runMCPCommand(server.apiUrl, openaiToken, input, {});
+          const result = await runMCPCommand(server.apiUrl, openaiToken, processedInput, {});
           setMessages(prev => [...prev, { role: 'assistant', content: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]);
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run OpenAI command.' }]);
@@ -284,6 +470,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         return;
       }
       // --- End OpenAI MCP Command Routing ---
+      // --- Drive intent recognition ---
       const key = localStorage.getItem(`${provider}_token`);
       if (!key) {
         setError('Please add an account in the provider portal.');
@@ -294,7 +481,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         provider,
         messages: [
           ...messages,
-          { role: 'user', content: input },
+          { role: 'user', content: processedInput },
         ],
         apiKeys: {
           openai: localStorage.getItem(`${provider}_token`) || undefined,
@@ -311,7 +498,12 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         // If the response is a filter object, set filters in context
         setFilters(parsed);
       }
-      setMessages(prev => [...prev, { role: 'assistant', content: assistantMsg }]);
+      setMessages(prev => {
+        if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === assistantMsg) {
+          return prev;
+        }
+        return [...prev, { role: 'assistant', content: assistantMsg }];
+      });
     } catch (err: any) {
       setError(err.message || 'Failed to send message');
     } finally {
@@ -352,6 +544,13 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     setProvider(e.target.value as LLMProvider);
   };
 
+  // Handle suggestion click (re-added after refactor)
+  const handleSuggestionClick = (cmd: string) => {
+    setInput(cmd + ' ');
+    setShowCommandSuggestions(false);
+    inputRef.current?.focus();
+  };
+
   return (
     <div className="relative">
       <div className={`w-full max-w-xl mx-auto rounded-xl border shadow-md p-4 flex flex-col space-y-4 ${darkMode ? 'bg-[#232323] border-zinc-700 text-white' : 'bg-white border-gray-200 text-black'}`}>
@@ -372,13 +571,21 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
                   ? 'bg-blue-100 text-blue-900 self-end ml-auto'
                   : 'bg-gray-100 text-gray-800 self-start mr-auto'
               }`}
-              style={{ display: idx >= messages.length - 3 ? 'block' : 'none' }}
+              style={{
+                whiteSpace: 'pre-wrap',
+                fontFamily: /^{|^\[/.test(msg.content.trim()) ? 'monospace' : undefined,
+              }}
             >
               {msg.content}
             </div>
           ))}
           {loading && (
-            <div className="px-3 py-2 rounded-lg bg-gray-100 text-gray-500 text-sm inline-block">Thinking...</div>
+            <>
+              <div className="w-full h-1 bg-blue-100 relative overflow-hidden rounded">
+                <div className="absolute inset-0 w-full h-full bg-blue-500 animate-pulse" style={{ animationDuration: '1.2s' }} />
+              </div>
+              <div className="px-3 py-2 rounded-lg bg-gray-100 text-gray-500 text-sm inline-block">Processing…</div>
+            </>
           )}
           {error && (
             <div className="px-3 py-2 rounded-lg bg-red-100 text-red-700 text-sm inline-block">{error}</div>
@@ -402,15 +609,17 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
             autoComplete="off"
           />
           {showCommandSuggestions && filteredCommands.length > 0 && (
-            <div className="absolute left-0 right-0 mt-1 bg-zinc-900 border border-zinc-700 rounded shadow-lg z-50 max-h-60 overflow-y-auto">
+            <div className={`absolute left-0 right-0 mt-1 rounded shadow-lg z-50 max-h-60 overflow-y-auto
+              ${darkMode ? 'bg-zinc-800 border border-zinc-600 text-white' : 'bg-white border border-gray-300 text-black'}`}
+            >
               {filteredCommands.map((c, i) => (
                 <div
                   key={c.command + i}
-                  className="px-4 py-2 cursor-pointer hover:bg-zinc-800 text-sm flex flex-col"
-                  onClick={() => handleSuggestionClick(c.command)}
+                  className={`px-4 py-2 cursor-pointer text-sm flex flex-col ${darkMode ? 'hover:bg-zinc-700' : 'hover:bg-gray-100'}`}
+                  onMouseDown={(e) => { e.preventDefault(); handleSuggestionClick(c.command); }}
                 >
                   <span className="font-semibold">{c.command}</span>
-                  <span className="text-xs text-zinc-400">{c.provider}</span>
+                  <span className={`text-xs ${darkMode ? 'text-zinc-400' : 'text-gray-500'}`}>{c.provider}</span>
                 </div>
               ))}
             </div>

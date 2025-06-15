@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from './Button';
 import { fetchUserRepos } from '../../services/githubService';
 import { listDriveFiles, listGmailMessages } from '../../services/googleService';
+import { triggerZapierWebhook } from '../../services/zapierService';
 import { useAuth } from '../../hooks/useAuth';
 import {
   getUserIntegrationAccounts,
@@ -11,6 +12,11 @@ import {
 } from '../../services/userIntegrationAccountsService';
 import { PROVIDER_COMMANDS } from '../../utils/providerCommands';
 import { useChatBarInput } from '../../context/ChatBarInputContext';
+
+// Static URLs for automation connectors
+const MAKE_APP_JSON_URL = '/integrations/makecom/mcp-app.json';
+const N8N_NPM_URL = 'https://www.npmjs.com/package/n8n-nodes-mcp';
+const ZAPIER_INVITE_URL = 'https://example.com/zapier-invite'; // TODO replace with real
 
 export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: string }> = ({ darkMode, selectedProvider }) => {
   const { user } = useAuth();
@@ -163,6 +169,38 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
   const [gmailMessages, setGmailMessages] = useState<any[]>([]);
   const [gmailLoading, setGmailLoading] = useState(false);
 
+  // Make.com credentials
+  const [makeBaseUrl, setMakeBaseUrl] = useState<string>(() => localStorage.getItem('makeBaseUrl') || '');
+  const [makeApiKey, setMakeApiKey] = useState<string>(() => localStorage.getItem('makeApiKey') || '');
+
+  const handleSaveMakeCreds = () => {
+    localStorage.setItem('makeBaseUrl', makeBaseUrl);
+    localStorage.setItem('makeApiKey', makeApiKey);
+  };
+
+  // Zapier NLA (AI Actions) – API Key stored locally
+  const [zapierApiKey, setZapierApiKey] = useState<string>(() => localStorage.getItem('zapierApiKey') || '');
+  const handleSaveZapierApiKey = () => {
+    localStorage.setItem('zapierApiKey', zapierApiKey);
+  };
+
+  // Zapier Private App – Base URL + API Key stored locally
+  const [zapierBaseUrl, setZapierBaseUrl] = useState<string>(() => localStorage.getItem('zapierBaseUrl') || '');
+  const [zapierPrivKey, setZapierPrivKey] = useState<string>(() => localStorage.getItem('zapierPrivKey') || '');
+  const handleSaveZapierPrivCreds = () => {
+    localStorage.setItem('zapierBaseUrl', zapierBaseUrl);
+    localStorage.setItem('zapierPrivKey', zapierPrivKey);
+  };
+
+  // n8n credentials
+  const [n8nBaseUrl, setN8nBaseUrl] = useState<string>(() => localStorage.getItem('n8nBaseUrl') || '');
+  const [n8nApiKey, setN8nApiKey] = useState<string>(() => localStorage.getItem('n8nApiKey') || '');
+
+  const handleSaveN8nCreds = () => {
+    localStorage.setItem('n8nBaseUrl', n8nBaseUrl);
+    localStorage.setItem('n8nApiKey', n8nApiKey);
+  };
+
   // Save GitHub token
   const handleGithubTokenChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const token = e.target.value;
@@ -195,8 +233,17 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
 
   // Handlers (to be implemented)
   const handleZapierTrigger = async () => {
-    setZapierResult('Triggered Zapier webhook (demo).');
-    // TODO: Call Zapier webhook with sample data
+    if (!zapierUrl) return;
+    setZapierResult('');
+    try {
+      await triggerZapierWebhook(zapierUrl, {
+        source: 'MCP-Hub',
+        triggeredAt: new Date().toISOString(),
+      });
+      setZapierResult('✅ Zap triggered successfully!');
+    } catch (err: any) {
+      setZapierResult(`❌ ${err.message || 'Failed to trigger Zap'}`);
+    }
   };
 
   const handleGithubFetch = async () => {
@@ -285,6 +332,17 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
           Trigger Zapier Webhook
         </Button>
         {zapierResult && <div className="mt-2 text-sm text-gray-700">{zapierResult}</div>}
+        {/* Zapier API Key for AI Actions */}
+        <div className="mt-4 space-y-2">
+          <input
+            type="password"
+            value={zapierApiKey}
+            onChange={e => setZapierApiKey(e.target.value)}
+            placeholder="Zapier API Key (AI Actions)"
+            className={`border rounded-lg px-3 py-2 text-sm w-full ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : 'border-gray-300'}`}
+          />
+          <Button onClick={handleSaveZapierApiKey} disabled={!zapierApiKey} className={darkMode ? 'bg-blue-700 text-white' : ''}>Save API Key Locally</Button>
+        </div>
       </div>
       )}
 
@@ -303,7 +361,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               <li key={acc.id} className={`flex items-center space-x-2 p-2 rounded ${activeGithubId === acc.id ? 'bg-blue-900/30 border border-blue-500' : ''}`}>
                 <span className="font-mono text-xs">{acc.account_label} ({partialToken(acc.credentials?.token)})</span>
                 <Button size="sm" onClick={() => handleSetActive('github', acc.id)} disabled={activeGithubId === acc.id} className={darkMode ? 'bg-blue-700 text-white' : ''}>{activeGithubId === acc.id ? 'Active' : 'Set Active'}</Button>
-                <Button size="sm" variant="danger" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
+                <Button size="sm" variant="destructive" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
               </li>
             ))}
           </ul>
@@ -332,7 +390,8 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               className="border rounded-lg px-2 py-1 text-sm"
             >
               <option value="">Select a command...</option>
-              {PROVIDER_COMMANDS['github'].map(cmd => (
+              {/* @ts-ignore -- providerCommands entry might be object with commands array */}
+              {((PROVIDER_COMMANDS['github'] as any).commands || PROVIDER_COMMANDS['github']).map((cmd: any) => (
                 <option key={cmd.value} value={cmd.value}>{cmd.label}</option>
               ))}
             </select>
@@ -357,7 +416,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               <li key={acc.id} className={`flex items-center space-x-2 p-2 rounded ${activeDriveId === acc.id ? 'bg-blue-900/30 border border-blue-500' : ''}`}>
                 <span className="font-mono text-xs">{acc.account_label} ({partialToken(acc.credentials?.token)})</span>
                 <Button size="sm" onClick={() => handleSetActive('google_drive', acc.id)} disabled={activeDriveId === acc.id} className={darkMode ? 'bg-blue-700 text-white' : ''}>{activeDriveId === acc.id ? 'Active' : 'Set Active'}</Button>
-                <Button size="sm" variant="danger" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
+                <Button size="sm" variant="destructive" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
               </li>
             ))}
           </ul>
@@ -399,7 +458,8 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               className="border rounded-lg px-2 py-1 text-sm"
             >
               <option value="">Select a command...</option>
-              {PROVIDER_COMMANDS['google_drive'].map(cmd => (
+              {/* @ts-ignore */}
+              {((PROVIDER_COMMANDS['google_drive'] as any).commands || PROVIDER_COMMANDS['google_drive']).map((cmd: any) => (
                 <option key={cmd.value} value={cmd.value}>{cmd.label}</option>
               ))}
             </select>
@@ -424,7 +484,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               <li key={acc.id} className={`flex items-center space-x-2 p-2 rounded ${activeGmailId === acc.id ? 'bg-blue-900/30 border border-blue-500' : ''}`}>
                 <span className="font-mono text-xs">{partialToken(acc.credentials?.token)}</span>
                 <Button size="sm" onClick={() => handleSetActive('gmail', acc.id)} disabled={activeGmailId === acc.id} className={darkMode ? 'bg-blue-700 text-white' : ''}>{activeGmailId === acc.id ? 'Active' : 'Set Active'}</Button>
-                <Button size="sm" variant="danger" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
+                <Button size="sm" variant="destructive" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
               </li>
             ))}
           </ul>
@@ -462,7 +522,8 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               className="border rounded-lg px-2 py-1 text-sm"
             >
               <option value="">Select a command...</option>
-              {PROVIDER_COMMANDS['gmail'].map(cmd => (
+              {/* @ts-ignore */}
+              {((PROVIDER_COMMANDS['gmail'] as any).commands || PROVIDER_COMMANDS['gmail']).map((cmd: any) => (
                 <option key={cmd.value} value={cmd.value}>{cmd.label}</option>
               ))}
             </select>
@@ -487,7 +548,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               <li key={acc.id} className={`flex items-center space-x-2 p-2 rounded ${activeAnthropicId === acc.id ? 'bg-blue-900/30 border border-blue-500' : ''}`}>
                 <span className="font-mono text-xs">{partialToken(acc.credentials?.token)}</span>
                 <Button size="sm" onClick={() => handleSetActive('anthropic', acc.id)} disabled={activeAnthropicId === acc.id} className={darkMode ? 'bg-blue-700 text-white' : ''}>{activeAnthropicId === acc.id ? 'Active' : 'Set Active'}</Button>
-                <Button size="sm" variant="danger" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
+                <Button size="sm" variant="destructive" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
               </li>
             ))}
           </ul>
@@ -504,7 +565,8 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               className="border rounded-lg px-2 py-1 text-sm"
             >
               <option value="">Select a command...</option>
-              {PROVIDER_COMMANDS['anthropic'].map(cmd => (
+              {/* @ts-ignore */}
+              {((PROVIDER_COMMANDS['anthropic'] as any).commands || PROVIDER_COMMANDS['anthropic']).map((cmd: any) => (
                 <option key={cmd.value} value={cmd.value}>{cmd.label}</option>
               ))}
             </select>
@@ -529,7 +591,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               <li key={acc.id} className={`flex items-center space-x-2 p-2 rounded ${activeOpenAIId === acc.id ? 'bg-blue-900/30 border border-blue-500' : ''}`}>
                 <span className="font-mono text-xs">{partialToken(acc.credentials?.token)}</span>
                 <Button size="sm" onClick={() => handleSetActive('openai', acc.id)} disabled={activeOpenAIId === acc.id} className={darkMode ? 'bg-blue-700 text-white' : ''}>{activeOpenAIId === acc.id ? 'Active' : 'Set Active'}</Button>
-                <Button size="sm" variant="danger" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
+                <Button size="sm" variant="destructive" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
               </li>
             ))}
           </ul>
@@ -546,7 +608,8 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               className="border rounded-lg px-2 py-1 text-sm"
             >
               <option value="">Select a command...</option>
-              {PROVIDER_COMMANDS['openai'].map(cmd => (
+              {/* @ts-ignore */}
+              {((PROVIDER_COMMANDS['openai'] as any).commands || PROVIDER_COMMANDS['openai']).map((cmd: any) => (
                 <option key={cmd.value} value={cmd.value}>{cmd.label}</option>
               ))}
             </select>
@@ -571,7 +634,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               <li key={acc.id} className={`flex items-center space-x-2 p-2 rounded ${activeGeminiId === acc.id ? 'bg-blue-900/30 border border-blue-500' : ''}`}>
                 <span className="font-mono text-xs">{partialToken(acc.credentials?.token)}</span>
                 <Button size="sm" onClick={() => handleSetActive('google', acc.id)} disabled={activeGeminiId === acc.id} className={darkMode ? 'bg-blue-700 text-white' : ''}>{activeGeminiId === acc.id ? 'Active' : 'Set Active'}</Button>
-                <Button size="sm" variant="danger" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
+                <Button size="sm" variant="destructive" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
               </li>
             ))}
           </ul>
@@ -588,13 +651,57 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
               className="border rounded-lg px-2 py-1 text-sm"
             >
               <option value="">Select a command...</option>
-              {PROVIDER_COMMANDS['google'].map(cmd => (
+              {/* @ts-ignore */}
+              {((PROVIDER_COMMANDS['google'] as any).commands || PROVIDER_COMMANDS['google']).map((cmd: any) => (
                 <option key={cmd.value} value={cmd.value}>{cmd.label}</option>
               ))}
             </select>
             <Button onClick={() => setInput(selectedCommand['google'] || '')} disabled={!selectedCommand['google']}>Run</Button>
           </div>
         )}
+      </div>
+      )}
+
+      {/* Make.com Custom App */}
+      {(!selectedProvider || selectedProvider === 'make_com') && (
+      <div>
+        <h2 className="text-lg font-bold mb-2">Make.com Custom App</h2>
+        <p className={`text-xs mb-1 ${darkMode ? 'text-zinc-300' : 'text-gray-600'}`}>Download the MCP Make.com app JSON and import it via <b>Create a tool → Import JSON</b> in Make.com.</p>
+        <a href={MAKE_APP_JSON_URL} download className="text-blue-400 underline text-sm">Download Make.com App JSON</a>
+        <div className="mt-3 space-y-2">
+          <input type="text" placeholder="Base URL (e.g. https://api.my-mcp.com)" value={makeBaseUrl} onChange={e => setMakeBaseUrl(e.target.value)} className={`border rounded-lg px-3 py-2 text-sm w-full ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : 'border-gray-300'}`} />
+          <input type="password" placeholder="API Key (optional)" value={makeApiKey} onChange={e => setMakeApiKey(e.target.value)} className={`border rounded-lg px-3 py-2 text-sm w-full ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : 'border-gray-300'}`} />
+          <Button onClick={handleSaveMakeCreds} className={darkMode ? 'bg-blue-700 text-white' : ''}>Save Credentials Locally</Button>
+        </div>
+      </div>
+      )}
+
+      {/* n8n Custom Node */}
+      {(!selectedProvider || selectedProvider === 'n8n') && (
+      <div>
+        <h2 className="text-lg font-bold mb-2">n8n Custom Node</h2>
+        <p className={`text-xs mb-1 ${darkMode ? 'text-zinc-300' : 'text-gray-600'}`}>Install the node in your n8n instance then set Base URL / API Key below.</p>
+        <a href={N8N_NPM_URL} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline text-sm">View on NPM (install guide)</a>
+        <div className="mt-3 space-y-2">
+          <input type="text" placeholder="Base URL (e.g. https://api.my-mcp.com)" value={n8nBaseUrl} onChange={e => setN8nBaseUrl(e.target.value)} className={`border rounded-lg px-3 py-2 text-sm w-full ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : 'border-gray-300'}`} />
+          <input type="password" placeholder="API Key (optional)" value={n8nApiKey} onChange={e => setN8nApiKey(e.target.value)} className={`border rounded-lg px-3 py-2 text-sm w-full ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : 'border-gray-300'}`} />
+          <Button onClick={handleSaveN8nCreds} className={darkMode ? 'bg-blue-700 text-white' : ''}>Save Credentials Locally</Button>
+        </div>
+      </div>
+      )}
+
+      {/* Zapier Private Integration */}
+      {(!selectedProvider || selectedProvider === 'zapier_cli') && (
+      <div>
+        <h2 className="text-lg font-bold mb-2">Zapier Private App</h2>
+        <p className={`text-xs mb-1 ${darkMode ? 'text-zinc-300' : 'text-gray-600'}`}>Ask Ops for the invite link to the private Zapier app, then install it to your workspace.</p>
+        <a href={ZAPIER_INVITE_URL} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline text-sm">Open Zapier Invite</a>
+        {/* Private app credentials */}
+        <div className="mt-3 space-y-2">
+          <input type="text" placeholder="Base URL (e.g. https://api.my-mcp.com)" value={zapierBaseUrl} onChange={e => setZapierBaseUrl(e.target.value)} className={`border rounded-lg px-3 py-2 text-sm w-full ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : 'border-gray-300'}`} />
+          <input type="password" placeholder="API Key" value={zapierPrivKey} onChange={e => setZapierPrivKey(e.target.value)} className={`border rounded-lg px-3 py-2 text-sm w-full ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : 'border-gray-300'}`} />
+          <Button onClick={handleSaveZapierPrivCreds} className={darkMode ? 'bg-blue-700 text-white' : ''}>Save Credentials Locally</Button>
+        </div>
       </div>
       )}
     </div>

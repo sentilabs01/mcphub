@@ -15,22 +15,11 @@ import { ProviderPortalModal } from "./ProviderPortalModal";
 import { PROVIDERS } from "../../data/providers";
 import type { ProviderMeta } from "../../data/providers";
 
-// List of local logo images from public/logos
-const localLogos = [
-  "/logos/jupyter-notebook.png",
-  "/logos/clickhouse.svg",
-  "/logos/Slack_icon_2019.svg.png",
-  "/logos/chroma-logo.png",
-  "/logos/Figma-logo.svg",
-  "/logos/Brave_icon_lionface.png",
-  "/logos/gemini_icon-logo_brandlogos.net_bqzeu.png",
-  "/logos/openai-icon-505x512-pr6amibw.png",
-  "/logos/anthropic-icon-tdvkiqisswbrmtkiygb0ia.webp",
-  "/logos/Octicons-mark-github.svg",
-  "/logos/google-drive-icon-google-product-illustration-free-png.webp",
-  "/logos/zapier-logo-svg-vector.svg",
-  "/logos/Gmail_icon_(2020).svg (1).webp"
-];
+// Build default logo list from PROVIDERS (unique)
+const localLogos = Array.from(new Set([
+  ...PROVIDERS.map(p => p.logo),
+  ...PROVIDERS.flatMap(p => p.logoDark ? [p.logoDark] : [])
+]));
 
 export const AnimatedCarousel = ({
   title = "Trusted by thousands of businesses worldwide",
@@ -52,10 +41,10 @@ export const AnimatedCarousel = ({
   logoImageHeight = "h-full",
   logoMaxWidth = "",
   logoMaxHeight = "",
+  darkMode = false,
 }) => {
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
-  const [darkMode, setDarkMode] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<ProviderMeta | null>(null);
 
@@ -77,22 +66,57 @@ export const AnimatedCarousel = ({
     return () => clearTimeout(timer);
   }, [api, current, autoPlay, autoPlayInterval]);
 
-  const logoItems = (logos || localLogos).map(l => typeof l === 'string' ? { src: l, alt: '', href: undefined } : l);
+  // Map white/dark variants back to colored versions when in light mode
+  const whiteToColor: Record<string, string> = {
+    '/logos/chatgptWHT.png': '/logos/openai-icon-505x512-pr6amibw.png',
+    '/logos/anthropicwhiteSymbol.png': '/logos/anthropic-icon-tdvkiqisswbrmtkiygb0ia.webp',
+    '/logos/github.png': '/logos/Octicons-mark-github.svg',
+  };
+
+  const colorToWhite: Record<string, string> = {
+    '/logos/openai-icon-505x512-pr6amibw.png': '/logos/chatgptWHT.png',
+    '/logos/anthropic-icon-tdvkiqisswbrmtkiygb0ia.webp': '/logos/anthropicwhiteSymbol.png',
+    '/logos/Octicons-mark-github.svg': '/logos/github.png',
+  };
+
+  const logoItems = (logos || localLogos).map(raw => {
+    const obj = typeof raw === 'string' ? { src: raw, alt: '', href: undefined } : raw;
+    let correctedSrc = obj.src;
+    if (!darkMode && whiteToColor[correctedSrc]) {
+      correctedSrc = whiteToColor[correctedSrc];
+    } else if (darkMode && colorToWhite[correctedSrc]) {
+      correctedSrc = colorToWhite[correctedSrc];
+    }
+    return { ...obj, src: correctedSrc };
+  });
   const logoImageSizeClasses = `${logoImageWidth} ${logoImageHeight} ${logoMaxWidth} ${logoMaxHeight}`.trim();
 
+  const findProvider = (logo: { src: string; alt?: string }) => {
+    // Try to match by logo src or alt (provider name, case-insensitive)
+    return PROVIDERS.find(p =>
+      p.logo === logo.src || p.logoDark === logo.src ||
+      (logo.alt && p.name.toLowerCase() === logo.alt.toLowerCase())
+    );
+  };
+
   const handleLogoClick = (logo: { src: string; alt?: string }) => {
-    const provider = PROVIDERS.find(p => p.logo === logo.src);
+    const provider = findProvider(logo);
     if (provider) {
       setSelectedProvider(provider);
       setModalOpen(true);
     }
   };
 
+  const getProviderId = (logo: { src: string; alt?: string }) => {
+    const provider = findProvider(logo);
+    return provider ? provider.id : undefined;
+  };
+
   return (
-    <div className={`w-full py-2 lg:py-4 bg-background overflow-x-hidden ${containerClassName}`}>
+    <div className={`w-full py-2 lg:py-4 bg-transparent overflow-x-hidden ${containerClassName}`}>
       <div className="w-full px-4">
         <div className={`flex flex-col gap-6 items-start justify-start`}>
-          <h2 className={`text-xl md:text-3xl md:text-5xl tracking-tighter lg:max-w-xl font-regular text-left ml-2 text-foreground ${titleClassName}`}>
+          <h2 className={`text-xl md:text-3xl md:text-5xl tracking-tighter lg:max-w-xl font-regular text-left ml-4 md:ml-12 lg:ml-20 ${darkMode ? 'text-white' : 'text-black'} ${titleClassName}`}>
             <TextRoll>{title}</TextRoll>
           </h2>
           <div>
@@ -101,13 +125,30 @@ export const AnimatedCarousel = ({
                 {logoItems.map((logo, index) => (
                   <CarouselItem className={`basis-1/${itemsPerViewMobile} lg:basis-1/${itemsPerViewDesktop}`} key={index}>
                     <div className={`flex rounded-md ${logoContainerWidth} ${logoContainerHeight} items-center justify-center p-4 hover:bg-accent transition-colors ${logoClassName}`}>
-                      <button onClick={() => handleLogoClick(logo)} className="focus:outline-none">
-                        <img 
+                      {getProviderId(logo) ? (
+                        <a
+                          href={`/portal/${getProviderId(logo)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={e => {
+                            e.preventDefault();
+                            handleLogoClick(logo);
+                          }}
+                          className="focus:outline-none"
+                        >
+                          <img
+                            src={logo.src}
+                            alt={logo.alt || `Logo ${index + 1}`}
+                            className={`${logoImageSizeClasses} object-contain ${logo.src.endsWith('chatgptWHT.png') || logo.src.endsWith('anthropicwhiteSymbol.png') || logo.src.endsWith('github.png') ? '' : 'filter invert dark:invert-0'}`}
+                          />
+                        </a>
+                      ) : (
+                        <img
                           src={logo.src}
                           alt={logo.alt || `Logo ${index + 1}`}
-                          className={`${logoImageSizeClasses} object-contain filter invert dark:invert-0`}
+                          className={`${logoImageSizeClasses} object-contain ${logo.src.endsWith('chatgptWHT.png') || logo.src.endsWith('anthropicwhiteSymbol.png') || logo.src.endsWith('github.png') ? '' : 'filter invert dark:invert-0'}`}
                         />
-                      </button>
+                      )}
                     </div>
                   </CarouselItem>
                 ))}

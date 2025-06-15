@@ -10,16 +10,25 @@ export async function runMCPCommand(apiUrl: string, apiKey: string, command: str
   const res = await fetch(`${apiUrl}/command`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
     },
     body: JSON.stringify({
       provider,
       apiKey,
       prompt: command,
+      command,
       context: args.context || {},
       metadata: args.metadata || {}
     })
   });
-  if (!res.ok) throw new Error('Command failed');
+  if (!res.ok) {
+    let errorMsg = `Command failed (status ${res.status})`;
+    try {
+      const text = await res.text();
+      if (text) errorMsg += `: ${text}`;
+    } catch {}
+    throw new Error(errorMsg);
+  }
   return res.json();
 } 

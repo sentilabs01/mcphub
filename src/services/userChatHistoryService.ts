@@ -1,13 +1,14 @@
 import { supabase } from '../lib/supabase';
 
-export async function getUserChatHistory(userId: string) {
+export async function getUserChatHistory(userId: string, limit = 50) {
   const { data, error } = await supabase
     .from('user_chat_history')
     .select('message, created_at')
     .eq('user_id', userId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: false })
+    .limit(limit);
   if (error) return [];
-  return data || [];
+  return (data || []).reverse();
 }
 
 export async function addUserChatMessage(userId: string, message: { role: string, content: string }) {

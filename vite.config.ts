@@ -8,6 +8,8 @@ export default defineConfig({
     exclude: ['lucide-react'],
   },
   server: {
-    // Proxy removed: '/api/anthropic' was previously set to 'http://localhost:3001'
+    proxy: {
+      '/api': 'http://localhost:3001',
+    },
   },
 });

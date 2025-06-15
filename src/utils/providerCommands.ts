@@ -155,4 +155,18 @@ export const PROVIDER_COMMANDS = {
       { label: 'Zap Info', value: '/zapier info zap_id' },
     ],
   },
+  make_com: {
+    homepage: 'https://www.make.com/',
+    commands: [
+      { label: 'Execute Command', value: '/make execute command' },
+      { label: 'Execute Workflow', value: '/make execute workflow' },
+    ],
+  },
+  n8n: {
+    homepage: 'https://n8n.io/',
+    commands: [
+      { label: 'Execute Command', value: '/n8n execute command' },
+      { label: 'Execute Workflow', value: '/n8n execute workflow' },
+    ],
+  },
 }; 
