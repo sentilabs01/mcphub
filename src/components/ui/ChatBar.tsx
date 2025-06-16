@@ -348,9 +348,22 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       const githubIntent = parseGithubIntent(processedInput);
       if (processedInput.startsWith('/github') || githubIntent) {
         const rawCmd = processedInput.startsWith('/github') ? processedInput : (githubIntent as string);
-        let cleanCmd = rawCmd.replace(/^\/github\s*/i, '').toLowerCase().trim();
-        // Convert common phrases to kebab-case slugs expected by MCP server
-        cleanCmd = cleanCmd.replace(/\s+/g, '-');
+        let cmdBody = rawCmd.replace(/^\/github\s*/i, '').toLowerCase().trim();
+        // Special handling for "create repo <name>"
+        const createRepoMatch = cmdBody.match(/^create\s+repo\s+(.+)/);
+        if (createRepoMatch) {
+          cmdBody = `create-repo ${createRepoMatch[1].trim()}`;
+        } else {
+          // General conversions: if starts with two words that form a known slug (e.g., "list repos" -> "list-repos")
+          const twoWord = cmdBody.match(/^(\w+)\s+(\w+)(.*)$/);
+          if (twoWord) {
+            const [, w1, w2, rest] = twoWord;
+            const slug = `${w1}-${w2}`;
+            cmdBody = rest ? `${slug}${rest}` : slug;
+          }
+          // Replace multiple spaces inside args with single spaces
+          cmdBody = cmdBody.replace(/\s+/g, ' ').trim();
+        }
         // Use MCP protocol for GitHub commands
         let githubToken = localStorage.getItem('github_token') || '';
         if (!githubToken && user) {
@@ -370,7 +383,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           return;
         }
         try {
-          const result = await runMCPCommand(server.apiUrl, githubToken, cleanCmd, {}, 'github');
+          const result = await runMCPCommand(server.apiUrl, githubToken, cmdBody, {}, 'github');
           setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('github', result) }]);
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run GitHub command.' }]);
@@ -562,9 +575,21 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     inputRef.current?.focus();
   };
 
+  const handleClearHistory = async () => {
+    setMessages([]);
+    setCommandHistory([]);
+    saveHistory([]);
+    // Optionally clear from backend
+    if (user) {
+      try {
+        await addUserChatMessage(user.id, [] as any);
+      } catch {}
+    }
+  };
+
   return (
     <div className="relative">
-      <div className={`w-full max-w-xl mx-auto rounded-xl border shadow-md p-4 flex flex-col space-y-4 ${darkMode ? 'bg-[#232323] border-zinc-700 text-white' : 'bg-white border-gray-200 text-black'}`}>
+      <div className={`w-full h-full mx-auto rounded-xl border shadow-md p-6 flex flex-col space-y-6 ${darkMode ? 'bg-[#1f1f1f] border-zinc-700 text-white' : 'bg-white border-gray-200 text-black'}`}>
         <div className="flex items-center space-x-2 mb-2">
           <label className={`text-sm font-medium ${darkMode ? 'text-zinc-200' : 'text-gray-700'}`}>Provider:</label>
           <select value={provider} onChange={handleProviderChange} className={`border rounded-lg px-2 py-1 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700' : 'border-gray-300'}`}>
@@ -572,22 +597,31 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearHistory}
+              className={`ml-auto text-xs underline ${darkMode ? 'text-red-400 hover:text-red-500' : 'text-red-600 hover:text-red-700'}`}
+            >
+              Clear history
+            </button>
+          )}
         </div>
-        <div ref={scrollerRef} className="flex-1 overflow-y-auto max-h-64 space-y-2">
+        <div ref={scrollerRef} className="flex-1 overflow-y-auto space-y-3">
           {messages.map((msg, idx) => (
             <div
               key={idx}
               className={`px-3 py-2 rounded-lg text-sm max-w-[80%] ${
                 msg.role === 'user'
-                  ? 'bg-blue-100 text-blue-900 self-end ml-auto'
-                  : 'bg-gray-100 text-gray-800 self-start mr-auto'
+                  ? (darkMode ? 'bg-blue-600 text-white self-end ml-auto' : 'bg-blue-100 text-blue-900 self-end ml-auto')
+                  : (darkMode ? 'bg-zinc-700 text-zinc-200 self-start mr-auto' : 'bg-gray-100 text-gray-800 self-start mr-auto')
               }`}
               style={{
                 whiteSpace: 'pre-wrap',
-                fontFamily: /^{|^\[/.test(msg.content.trim()) ? 'monospace' : undefined,
+                fontFamily: typeof msg.content === 'string' && /^{|^\[/.test(msg.content.trim()) ? 'monospace' : undefined,
               }}
             >
-              {msg.content}
+              {typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}
             </div>
           ))}
           {loading && (

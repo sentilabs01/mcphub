@@ -35,7 +35,7 @@ function MinimalAppContent() {
   });
 
   // Chat box size persistence
-  const defaultSize = { width: 400, height: 260 };
+  const defaultSize = { width: 800, height: 520 };
   const [chatBoxSize, setChatBoxSize] = useState<{ width: number; height: number }>(() => {
     const saved = localStorage.getItem('chatBoxSize');
     return saved ? JSON.parse(saved) : defaultSize;
@@ -51,6 +51,13 @@ function MinimalAppContent() {
   useEffect(() => {
     localStorage.setItem('chatMinimized', JSON.stringify(chatMinimized));
   }, [chatMinimized]);
+
+  const [viewportHeight, setViewportHeight] = useState(typeof window !== 'undefined' ? window.innerHeight : 800);
+  useEffect(() => {
+    const handleResize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   React.useEffect(() => {
     if (darkMode) {
@@ -153,23 +160,26 @@ function MinimalAppContent() {
                 height: prev.height + d.height
               }));
             }}
-            minWidth={320}
-            minHeight={120}
-            maxWidth={600}
-            maxHeight={600}
+            minWidth={640}
+            minHeight={240}
+            maxWidth={1200}
+            maxHeight={Math.max(320, viewportHeight - 80)}
             enable={{
-              top: true, right: true, bottom: true, left: true,
-              topRight: true, bottomRight: true, bottomLeft: true, topLeft: true
+              top: false,
+              bottom: true,
+              left: true,
+              right: true,
+              bottomLeft: true,
+              bottomRight: true,
+              topLeft: false,
+              topRight: false,
             }}
             handleStyles={{
               bottomRight: { width: '18px', height: '18px', right: 0, bottom: 0, background: 'transparent', borderRadius: '0 0 8px 0', cursor: 'se-resize', transition: 'background 0.2s' },
-              topLeft: { width: '14px', height: '14px', left: 0, top: 0, background: 'transparent', borderRadius: '8px 0 0 0', cursor: 'nw-resize', transition: 'background 0.2s' },
-              topRight: { width: '14px', height: '14px', right: 0, top: 0, background: 'transparent', borderRadius: '0 8px 0 0', cursor: 'ne-resize', transition: 'background 0.2s' },
-              bottomLeft: { width: '14px', height: '14px', left: 0, bottom: 0, background: 'transparent', borderRadius: '0 0 0 8px', cursor: 'sw-resize', transition: 'background 0.2s' },
-              top: { height: '8px', top: 0, left: '14px', right: '14px', background: 'transparent', cursor: 'n-resize', transition: 'background 0.2s' },
-              bottom: { height: '8px', bottom: 0, left: '14px', right: '14px', background: 'transparent', cursor: 's-resize', transition: 'background 0.2s' },
-              left: { width: '8px', left: 0, top: '14px', bottom: '14px', background: 'transparent', cursor: 'w-resize', transition: 'background 0.2s' },
-              right: { width: '8px', right: 0, top: '14px', bottom: '14px', background: 'transparent', cursor: 'e-resize', transition: 'background 0.2s' },
+              bottomLeft: { width: '18px', height: '18px', left: 0, bottom: 0, background: 'transparent', borderRadius: '0 0 0 8px', cursor: 'sw-resize', transition: 'background 0.2s' },
+              bottom: { height: '18px', bottom: 0, left: 0, right: 0, background: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', cursor: 's-resize', transition: 'background 0.2s' },
+              left: { width: '10px', left: 0, top: '18px', bottom: '18px', background: 'transparent', cursor: 'w-resize', transition: 'background 0.2s' },
+              right: { width: '10px', right: 0, top: '18px', bottom: '18px', background: 'transparent', cursor: 'e-resize', transition: 'background 0.2s' },
             }}
             className="z-50 fixed bg-transparent border-none shadow-none"
           >

@@ -1,5 +1,22 @@
 # AI Hub
 
+## 🚀 July 2025 Update – MCP Routing & Credential Quality-of-Life
+
+- **Google OAuth auto-refresh** is now baked into `useAuth`.  The browser silently renews the Google `provider_token` two minutes before expiry and stores the fresh token in `localStorage.googleToken`. Drive/Gmail commands never break.
+- **GitHub credential fallback**: the UI now fetches the Personal-Access-Token from Supabase (`user_credentials`) when not found in `localStorage`, so multi-device sessions Just Work™.
+- **Native GitHub MCP micro-service**: `backend/providers/github.js` handles `list-repos`, `get-issues`, `create-issue`.  Supabase `mcp_servers.id = 'github'` already points to `http://localhost:3001/api` – no code change needed in the front-end.
+- **Pretty-print results**: Smart-Chat turns arrays returned by MCP into tidy numbered lists (repos, Drive files, Gmail messages). Placeholders are now summarised instead of dumping raw JSON.
+
+### 👋 A note for Manus (next-phase lead)
+
+1. **Provider plug-ins** ‑ Each new provider lives in `backend/providers/*.js` (see `github.js` for the template). Expose `{ id, supportedCommands, executeCommand }` and the gateway auto-loads it.
+2. **Workflow engine** ‑ Roadmap item: chain multi-step plans (`plan.steps`) in the back-end so front-end simply posts a plan ID.
+3. **Realtime credential sync** ‑ Consider enabling Supabase Realtime on `user_credentials` to push token changes to all open tabs.
+4. **Production readiness** ‑ Move gateway + providers to Docker images; use Fly.io or Render for zero-ops deploy; add rate-limit middleware.
+5. **DX** ‑ Add a `npm run dev:all` script that launches Vite + MCP gateway + providers concurrently via `npm-run-all`.
+
+> Feel free to ping @senti-labs/ai-hub if anything is unclear—let's keep velocity high!  🌟
+
 ## Changelog / Latest Updates (June 2025)
 
 - **All LLM providers (OpenAI, Anthropic, Gemini) now route through the backend for chat and key validation.**
@@ -251,3 +268,31 @@ This repo uses the standard GitHub flow:
 4.  Merge to `main` after review.
 
 > **Tip**: The stub `server.js` is for local dev only – do **not** deploy it to production. Remove it from the branch if you are targeting the real MCP server. 
+
+### 🚦 MCP Quick-Command Cheat Sheet (GitHub)
+
+| Natural language | Slash form | Routed command string |
+|------------------|-----------|------------------------|
+| **List repos**                 | `/github list repos`                | `list-repos` |
+| **Create repo** `my-demo`      | `/github create repo my-demo`       | `create-repo my-demo` |
+| **Create issue** `owner/repo` *"Bug title" "Body"* | `/github create issue owner/repo "Bug title" "Body"` | `create-issue owner/repo` + args JSON |
+| **List issues** `owner/repo`   | `/github list issues owner/repo`    | `list-issues owner/repo` |
+
+> A **GitHub Personal-Access-Token** with `repo` scope must be stored in the Integrations panel (it's sent as `Authorization: Bearer …`).
+
+The same pattern applies to other providers (`/drive`, `/gmail`, etc.).
+
+---
+
+### 🔑 Auth & Version headers
+
+Since **July 2024** the gateway expects:
+
+```http
+Authorization: Bearer <provider_token>
+Accept-Version: 2024-07-01
+```
+
+Front-end sends these automatically via `src/services/mcpApiService.ts`.  If you call the gateway manually (e.g., cURL or Postman) include both headers.
+
+Async commands return **202 Accepted** with `{ jobId, eta }`.  The UI now polls `/job/{jobId}` until `{ done:true }`. 
