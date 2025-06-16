@@ -113,8 +113,13 @@ function parseDriveIntent(input: string): string | null {
 function parseGmailIntent(input: string): string | null {
   const lower = input.toLowerCase().trim();
 
-  // list inbox / unread
-  if (/^(list|show|get)\s+(my\s+)?(inbox|emails|messages)(?:\s+unread)?/.test(lower)) {
+  // list inbox / unread / recent
+  if (/^(list|show|get)\s+(my\s+)?((recent|latest)\s+)?(inbox|emails|messages)(?:\s+unread)?/.test(lower)) {
+    return '/gmail List inbox';
+  }
+
+  // Phrases like "recent emails" or "latest inbox" (no leading verb)
+  if (/^(recent|latest)\s+(emails?|messages?|inbox)/.test(lower)) {
     return '/gmail List inbox';
   }
 
@@ -152,6 +157,10 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   // Cache of live commands fetched from MCP servers { providerId -> commands[] }
   const [liveCommandCache, setLiveCommandCache] = useState<Record<string, string[]>>({});
+  // Track last submitted command to throttle accidental repeats
+  const lastSubmitRef = useRef<{ cmd: string; ts: number }>({ cmd: '', ts: 0 });
+  // Ref lock to prevent duplicate submissions before React state updates propagate
+  const inFlightRef = useRef(false);
 
   // Load settings and history from Supabase or localStorage on mount
   useEffect(() => {
@@ -245,6 +254,9 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     return result;
   };
 
+  // Pre-calc list of valid provider IDs to avoid unnecessary Supabase queries
+  const VALID_PROVIDER_IDS = React.useMemo(() => PROVIDERS.map(p => p.id), []);
+
   // Fetch live commands for provider prefix if necessary & filter suggestions
   useEffect(() => {
     if (!input.startsWith('/')) {
@@ -256,7 +268,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     const match = input.match(/^\/([a-zA-Z0-9_\-]+)/);
     const providerKey = match ? match[1] : '';
 
-    if (providerKey && !liveCommandCache[providerKey]) {
+    if (providerKey && VALID_PROVIDER_IDS.includes(providerKey) && !liveCommandCache[providerKey]) {
       // Attempt to fetch live commands
       (async () => {
         try {
@@ -317,8 +329,21 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   }, [provider]);
 
   const handleSend = async () => {
-    if (loading) return; // prevent accidental double submission
+    // Prevent double submission: use a synchronous ref in addition to React state
+    if (inFlightRef.current || loading) return;
+    inFlightRef.current = true;
     if (!input.trim()) return;
+
+    // Throttle identical submits within 1 second
+    const now = Date.now();
+    if (
+      lastSubmitRef.current.cmd === input.trim() &&
+      now - lastSubmitRef.current.ts < 1000
+    ) {
+      return;
+    }
+    lastSubmitRef.current = { cmd: input.trim(), ts: now };
+
     let processedInput = input;
     // Generic: if user typed a command slug without leading /provider, prepend automatically
     if (!processedInput.startsWith('/')) {
@@ -383,7 +408,29 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           return;
         }
         try {
-          const result = await runMCPCommand(server.apiUrl, githubToken, cmdBody, {}, 'github');
+          // Try to match command slug with server-exposed commands to handle kebab vs snake_case
+          let finalCmd = cmdBody;
+          if (!liveCommandCache['github']) {
+            try {
+              const cmds = await fetchMCPCommands(server.apiUrl, githubToken);
+              setLiveCommandCache(prev => ({ ...prev, github: Array.isArray(cmds) ? cmds : [] }));
+            } catch {}
+          }
+          const available = liveCommandCache['github'] || [];
+          if (available.length > 0 && !available.includes(finalCmd)) {
+            const variants = [
+              finalCmd.replace(/-/g, '_'),
+              finalCmd.replace(/_/g, '-'),
+              finalCmd.split(' ').join('-'),
+              finalCmd.split(' ').join('_'),
+            ];
+            const matched = variants.find(v => available.includes(v));
+            if (matched) {
+              finalCmd = matched;
+            }
+          }
+
+          const result = await runMCPCommand(server.apiUrl, githubToken, finalCmd, {}, 'github');
           setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('github', result) }]);
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run GitHub command.' }]);
@@ -394,7 +441,40 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       // --- End GitHub Chat Commands ---
       // --- Google Drive Chat Commands ---
       if (processedInput.startsWith('/drive') || processedInput.startsWith('/google_drive')) {
-        // Use Supabase Google token if available; proceed even if missing (public endpoints may not need it)
+        // Normalize the command by stripping the prefix and converting common phrases to kebab-case slugs
+        const rawDrive = processedInput.replace(/^\/(drive|google_drive)\s*/i, '').trim();
+        let driveCmd = rawDrive.toLowerCase();
+
+        // Explicit alias mapping for frequent actions
+        if (driveCmd === 'list files' || driveCmd === 'list my files' || driveCmd === 'list drive files') {
+          driveCmd = 'list-files';
+        } else {
+          // Generic conversion: first two words → kebab-case slug (e.g. "upload file" => "upload-file")
+          const twoWord = driveCmd.match(/^(\w+)\s+(\w+)(.*)$/);
+          if (twoWord) {
+            const [, w1, w2, rest] = twoWord;
+            const slug = `${w1}-${w2}`;
+            driveCmd = rest ? `${slug}${rest}`.trim() : slug;
+          }
+          driveCmd = driveCmd.replace(/\s+/g, ' ').trim();
+        }
+
+        // Only use Supabase session provider_token if it looks like a Google OAuth access token
+        const maybeGoogleTok = googleToken && googleToken.startsWith('ya29') ? googleToken : '';
+        let driveToken: string = localStorage.getItem('google_drive_token') || localStorage.getItem('gmail_token') || maybeGoogleTok;
+        if (!driveToken && user) {
+          try {
+            const rec = await getCredential(user.id, 'google_drive');
+            driveToken = rec?.credentials?.token || rec?.credentials?.accessToken || '';
+          } catch {}
+        }
+
+        if (!driveToken) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Please connect your Google account in Integrations first.' }]);
+          setLoading(false);
+          return;
+        }
+
         // Route to MCP server for Drive
         const server = await MCPServerService.getServerById('google_drive');
         if (!server || !server.apiUrl) {
@@ -403,7 +483,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           return;
         }
         try {
-          const result = await runMCPCommand(server.apiUrl, googleToken, processedInput.trim(), {}, 'google_drive');
+          const result = await runMCPCommand(server.apiUrl, driveToken, driveCmd, {}, 'google_drive');
           setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('google_drive', result) }]);
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Drive command.' }]);
@@ -417,12 +497,45 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         const cleanGmailCmd = rawGmail.replace(/^\/gmail\s*/i, '').trim().toLowerCase();
         // Map common aliases to canonical backend commands
         let gmailCmd = cleanGmailCmd;
-        if (gmailCmd === 'list inbox' || gmailCmd === 'list emails' || gmailCmd === 'list messages') {
+
+        // Alias: "get email <id>" → "get-message <id>"
+        const getEmailMatch = gmailCmd.match(/^get email\s+(\S+)/);
+        if (getEmailMatch) {
+          gmailCmd = `get-message ${getEmailMatch[1]}`;
+        }
+
+        // Common phrases meaning list inbox / recent messages
+        const listAliases = [
+          'list inbox', 'list emails', 'list messages',
+          'recent emails', 'get recent emails', 'recent messages', 'get recent messages',
+          'get emails', 'get inbox', 'recent inbox'
+        ];
+        if (listAliases.includes(gmailCmd)) {
           gmailCmd = 'list-messages';
         }
-        // More mappings can be added here (e.g., send email, get message)
 
-        // Proceed even if googleToken empty
+        // If user typed get-message without an ID, prompt for correct usage
+        if (gmailCmd === 'get-message') {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Please specify the Gmail message ID: e.g. /gmail get-message <id>' }]);
+          setLoading(false);
+          return;
+        }
+
+        const maybeGoogleTok2 = googleToken && googleToken.startsWith('ya29') ? googleToken : '';
+        let gmailToken: string = localStorage.getItem('gmail_token') || localStorage.getItem('google_drive_token') || maybeGoogleTok2;
+        if (!gmailToken && user) {
+          try {
+            const rec = await getCredential(user.id, 'gmail');
+            gmailToken = rec?.credentials?.token || rec?.credentials?.accessToken || '';
+          } catch {}
+        }
+
+        if (!gmailToken) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Please connect your Gmail account in Integrations first.' }]);
+          setLoading(false);
+          return;
+        }
+
         // Route to MCP server for Gmail
         const server = await MCPServerService.getServerById('gmail');
         if (!server || !server.apiUrl) {
@@ -431,8 +544,34 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           return;
         }
         try {
-          const result = await runMCPCommand(server.apiUrl, googleToken, gmailCmd, {}, 'gmail');
-          setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('gmail', result) }]);
+          const result = await runMCPCommand(server.apiUrl, gmailToken as string, gmailCmd, {}, 'gmail');
+
+          // If we listed messages but there is no subject/snippet, fetch details for first 10 to show subjects
+          if (gmailCmd === 'list-messages' && Array.isArray(result) && result.length > 0 && (!('subject' in result[0]) && !('snippet' in result[0]))) {
+            const ids = result.slice(0, 10).map((m: any) => m.id).filter(Boolean);
+            try {
+              const detailed = await Promise.all(ids.map(async (mid: string) => {
+                try {
+                  const det = await runMCPCommand(server.apiUrl, gmailToken as string, `get-message ${mid}`, {}, 'gmail');
+                  const d: any = det as any;
+                  return { id: mid, subject: d.subject || d.snippet || '(no subject)' };
+                } catch {
+                  return { id: mid, subject: '(error fetching details)' };
+                }
+              }));
+              // merge subjects back into original list
+              const merged = result.map((m: any) => {
+                const found = detailed.find(d => d.id === m.id);
+                return found ? { ...m, subject: found.subject } : m;
+              });
+              const pretty = prettyPrintResult('gmail', merged);
+              setMessages(prev => [...prev, { role: 'assistant', content: pretty }]);
+            } catch {
+              setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('gmail', result) }]);
+            }
+          } else {
+            setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('gmail', result) }]);
+          }
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Gmail command.' }]);
         }
@@ -532,6 +671,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       setError(err.message || 'Failed to send message');
     } finally {
       setLoading(false);
+      inFlightRef.current = false; // release lock
     }
   };
 
@@ -669,7 +809,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
               ))}
             </div>
           )}
-          <Button type="submit" className="px-4 py-2">Send</Button>
+          <Button type="submit" className="px-4 py-2" disabled={loading}>Send</Button>
         </form>
         {/* Command history dropdown (if you want to show it, e.g. below the input) */}
         {historyIndex !== null && commandHistory.length > 0 && (

@@ -26,12 +26,31 @@ export function prettyPrintResult(provider: string, data: any): string {
         break;
       }
       case 'gmail': {
-        const msgs = Array.isArray(data) ? data : (data && (data as any).messages);
+        // Result shapes: direct array OR { messages: [...] } OR { raw_response: { messages: [...] } }
+        let msgs: any = null;
+        if (Array.isArray(data)) msgs = data;
+        else if (data && Array.isArray((data as any).messages)) msgs = (data as any).messages;
+        else if (data && (data as any).raw_response && Array.isArray((data as any).raw_response.messages)) {
+          msgs = (data as any).raw_response.messages;
+        }
+
         if (Array.isArray(msgs)) {
           if (msgs.length === 0) return 'No emails matching your query.';
           return msgs
             .slice(0, 20)
-            .map((m: any, idx) => `${idx + 1}. ${m.subject || m.snippet || '(no subject)'}  – ${m.from || m.sender || ''}`)
+            .map((m: any, idx) => {
+              const subject = m.subject || '';
+              const snippet = m.snippet || m.snippetText || '';
+              const from = m.from || m.sender || '';
+              const id = m.id || m.messageId || '';
+              const date = m.date || m.internalDate || '';
+              const subjCol = (subject || '(no subject)').slice(0, 60).padEnd(60);
+              const fromCol = from.slice(0, 24).padEnd(24);
+              const dateCol = date.toString().slice(0, 16).padEnd(16);
+              const headerLine = `${idx + 1}. ${subjCol}  ${fromCol}  ${dateCol}  ID: ${id}`;
+              const snip = snippet && snippet !== subject ? `\n    ${snippet.slice(0, 120)}` : '';
+              return headerLine + snip;
+            })
             .join('\n');
         }
         break;
