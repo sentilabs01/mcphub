@@ -145,6 +145,41 @@ export const PROVIDERS: ProviderMeta[] = [
     mcpServerId: 'zapier',
     commands: ['Execute command', 'Execute workflow']
   },
+  {
+    id: 'google_calendar',
+    name: 'Google Calendar',
+    logo: '/logos/Google_Calendar_icon_(2020).svg.png',
+    mcpServerId: 'google_calendar',
+    commands: ['List events', 'Create event', 'Update event', 'Delete event'],
+  },
+  {
+    id: 'bolt',
+    name: 'Bolt',
+    logo: '/logos/bolt.jpg',
+    mcpServerId: 'bolt',
+    commands: ['search', 'summarize', 'automate-task'],
+  },
+  {
+    id: 'loveable',
+    name: 'Loveable',
+    logo: '/logos/lovable-logo-icon.svg',
+    mcpServerId: 'loveable',
+    commands: ['list-projects', 'create-project', 'deploy'],
+  },
+  {
+    id: 'cursor',
+    name: 'Cursor',
+    logo: '/logos/cursor.png',
+    mcpServerId: 'cursor',
+    commands: ['open', 'search', 'code-complete'],
+  },
+  {
+    id: '21st_dev',
+    name: '21st DEV',
+    logo: '/logos/21st dev logo.png',
+    mcpServerId: '21st_dev',
+    commands: ['generate-ui', 'list-components', 'refactor'],
+  },
 ];
 
 export { PROVIDERS as default }; 

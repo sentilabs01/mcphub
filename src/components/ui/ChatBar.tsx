@@ -482,14 +482,38 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           setLoading(false);
           return;
         }
-        try {
-          const result = await runMCPCommand(server.apiUrl, driveToken, driveCmd, {}, 'google_drive');
-          setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('google_drive', result) }]);
-        } catch (err: any) {
-          setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Drive command.' }]);
+        let driveRefresh = '';
+        if (user) {
+          const recDrive = await getCredential(user.id, 'google_drive');
+          const recGmail = await getCredential(user.id, 'gmail');
+          driveRefresh = recDrive?.credentials?.refresh_token || recGmail?.credentials?.refresh_token || '';
         }
-        setLoading(false);
-        return;
+        let result: any;
+        try {
+          result = await runMCPCommand(server.apiUrl, driveToken as string, driveCmd, {}, 'google_drive');
+        } catch (err: any) {
+          // Attempt refresh on auth error once
+          if (driveRefresh && /invalid authentication/i.test(err.message)) {
+            try {
+              const refRes = await fetch(`${server.apiUrl}/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: driveRefresh }),
+              });
+              if (refRes.ok) {
+                const json = await refRes.json();
+                if (json.access_token) {
+                  driveToken = json.access_token;
+                  localStorage.setItem('google_drive_token', driveToken);
+                  result = await runMCPCommand(server.apiUrl, driveToken as string, driveCmd, {}, 'google_drive');
+                }
+              }
+            } catch (_) {
+              throw err;
+            }
+          } else throw err;
+        }
+        setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('google_drive', result) }]);
       }
       // --- Gmail Chat Commands ---
       if (processedInput.startsWith('/gmail') || maybeGmail) {
@@ -543,41 +567,105 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           setLoading(false);
           return;
         }
+        // Prepare refresh token for Gmail
+        let gmailRefresh = '';
+        if (user) {
+          const recGmail = await getCredential(user.id, 'gmail');
+          const recDrive = await getCredential(user.id, 'google_drive');
+          gmailRefresh = recGmail?.credentials?.refresh_token || recDrive?.credentials?.refresh_token || '';
+        }
+        let gmailResult: any;
         try {
-          const result = await runMCPCommand(server.apiUrl, gmailToken as string, gmailCmd, {}, 'gmail');
-
-          // If we listed messages but there is no subject/snippet, fetch details for first 10 to show subjects
-          if (gmailCmd === 'list-messages' && Array.isArray(result) && result.length > 0 && (!('subject' in result[0]) && !('snippet' in result[0]))) {
-            const ids = result.slice(0, 10).map((m: any) => m.id).filter(Boolean);
+          gmailResult = await runMCPCommand(server.apiUrl, gmailToken as string, gmailCmd, {}, 'gmail');
+        } catch (err: any) {
+          if (gmailRefresh && /invalid authentication/i.test(err.message)) {
             try {
-              const detailed = await Promise.all(ids.map(async (mid: string) => {
-                try {
-                  const det = await runMCPCommand(server.apiUrl, gmailToken as string, `get-message ${mid}`, {}, 'gmail');
-                  const d: any = det as any;
-                  return { id: mid, subject: d.subject || d.snippet || '(no subject)' };
-                } catch {
-                  return { id: mid, subject: '(error fetching details)' };
-                }
-              }));
-              // merge subjects back into original list
-              const merged = result.map((m: any) => {
-                const found = detailed.find(d => d.id === m.id);
-                return found ? { ...m, subject: found.subject } : m;
+              const refRes = await fetch(`${server.apiUrl}/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: gmailRefresh }),
               });
-              const pretty = prettyPrintResult('gmail', merged);
-              setMessages(prev => [...prev, { role: 'assistant', content: pretty }]);
-            } catch {
-              setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('gmail', result) }]);
+              if (refRes.ok) {
+                const json = await refRes.json();
+                if (json.access_token) {
+                  gmailToken = json.access_token;
+                  localStorage.setItem('gmail_token', gmailToken);
+                  gmailResult = await runMCPCommand(server.apiUrl, gmailToken as string, gmailCmd, {}, 'gmail');
+                }
+              }
+            } catch (_) {
+              throw err;
             }
           } else {
-            setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('gmail', result) }]);
+            setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Gmail command.' }]);
+            setLoading(false);
+            return;
           }
+        }
+        // reuse existing pretty print block using gmailResult instead of result
+        const result = gmailResult;
+        // Try to parse the assistant's message as JSON for marketplace filters
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(result);
+        } catch {}
+        if (parsed && (parsed.category || parsed.tags || parsed.pricing)) {
+          // If the response is a filter object, set filters in context
+          setFilters(parsed);
+        }
+        setMessages(prev => {
+          if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === result) {
+            return prev;
+          }
+          return [...prev, { role: 'assistant', content: result }];
+        });
+      }
+      // --- Google Calendar Chat Commands ---
+      if (processedInput.startsWith('/calendar') || processedInput.startsWith('/google_calendar')) {
+        const rawCal = processedInput.replace(/^\/(calendar|google_calendar)\s*/i, '').trim();
+        let calCmd = rawCal.toLowerCase();
+        // Simple alias mapping (expand as needed)
+        if (calCmd === '' || calCmd === 'list events' || calCmd === 'list my events' || calCmd === 'events today') {
+          calCmd = 'list-events';
+        }
+        if (calCmd === 'list calendars' || calCmd === 'calendars') {
+          calCmd = 'list-calendars';
+        }
+
+        const maybeGoogleTok3 = googleToken && googleToken.startsWith('ya29') ? googleToken : '';
+        let calToken: string = localStorage.getItem('google_calendar_token') || localStorage.getItem('google_drive_token') || maybeGoogleTok3;
+        if (!calToken && user) {
+          try {
+            const recCal = await getCredential(user.id, 'google_calendar');
+            const recDrive = await getCredential(user.id, 'google_drive');
+            const recGmail = await getCredential(user.id, 'gmail');
+            calToken = recCal?.credentials?.token || recDrive?.credentials?.token || recGmail?.credentials?.token || '';
+          } catch {}
+        }
+
+        if (!calToken) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Please connect your Google account in Integrations first.' }]);
+          setLoading(false);
+          return;
+        }
+
+        const server = await MCPServerService.getServerById('google_calendar');
+        if (!server || !server.apiUrl) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Google Calendar MCP server not found.' }]);
+          setLoading(false);
+          return;
+        }
+
+        try {
+          const result = await runMCPCommand(server.apiUrl, calToken as string, calCmd, {}, 'google_calendar');
+          setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('google_calendar', result) }]);
         } catch (err: any) {
-          setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Gmail command.' }]);
+          setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Google Calendar command.' }]);
         }
         setLoading(false);
         return;
       }
+      // --- End Google Calendar Chat Commands ---
       // --- Zapier Chat Commands (AI Actions / NLA) ---
       if (processedInput.startsWith('/zapier')) {
         const cleanZapierCmdRaw = processedInput.replace(/^\/zapier\s*/i, '').trim();

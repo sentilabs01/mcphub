@@ -15,6 +15,7 @@ import { Avatar, AvatarImage } from './components/ui/avatar';
 import Draggable from 'react-draggable';
 import { Resizable } from 're-resizable';
 import { ServerStatusIndicator } from './components/ui/ServerStatusIndicator';
+import { IntegrationsDropdown } from './components/ui/IntegrationsDropdown';
 // import { EnhancedChatUI } from './components/ui/EnhancedChatUI';
 // import { useAuth } from './hooks/useAuth';
 // import { AuthModal } from './components/auth/AuthModal';
@@ -105,34 +106,39 @@ function MinimalAppContent() {
 
   return (
     <div className={`min-h-[100vh] h-auto w-full flex flex-col items-center justify-start py-12 bg-white dark:bg-black ${darkMode ? 'text-white' : 'text-black'}`}>
-      <div className="absolute top-4 right-4 flex space-x-2 items-center z-50">
-        <ServerStatusIndicator />
-        <Button
-          variant="ghost"
-          onClick={() => setDarkMode(dm => !dm)}
-          className="flex items-center gap-2"
-          aria-label="Toggle dark mode"
-        >
-          {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          <span className="sr-only">Toggle dark mode</span>
-        </Button>
-        {/* Minimized chat icon */}
-        {chatMinimized && (
-          <button
-            onClick={() => setChatMinimized(false)}
-            className="ml-2 p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-            aria-label="Open chat"
+      <div className="absolute top-4 right-4 flex flex-col items-end space-y-2 z-50">
+        <div className="flex items-center space-x-2">
+          <ServerStatusIndicator />
+          <Button
+            variant="ghost"
+            onClick={() => setDarkMode(dm => !dm)}
+            className="flex items-center gap-2"
+            aria-label="Toggle dark mode"
           >
-            <Minus className="w-6 h-6" />
-          </button>
-        )}
-        <div className="relative group">
-          <Avatar>
-            <AvatarImage src={user?.user_metadata?.picture || ''} alt={user?.email || 'User'} />
-          </Avatar>
-          <div className={`absolute right-0 mt-2 w-32 rounded shadow-lg z-50 ${darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-black'} opacity-0 group-hover:opacity-100 transition-opacity`}>
-            <button onClick={signOut} className="block w-full text-left px-4 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">Sign Out</button>
+            {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            <span className="sr-only">Toggle dark mode</span>
+          </Button>
+          {chatMinimized && (
+            <button
+              onClick={() => setChatMinimized(false)}
+              className="ml-2 p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+              aria-label="Open chat"
+            >
+              <Minus className="w-6 h-6" />
+            </button>
+          )}
+          <div className="relative group">
+            <Avatar>
+              <AvatarImage src={user?.user_metadata?.picture || ''} alt={user?.email || 'User'} />
+            </Avatar>
+            <div className={`absolute right-0 mt-2 w-32 rounded shadow-lg z-50 ${darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-black'} opacity-0 group-hover:opacity-100 transition-opacity`}>
+              <button onClick={signOut} className="block w-full text-left px-4 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">Sign Out</button>
+            </div>
           </div>
+        </div>
+        {/* Integrations dropdown */}
+        <div className="self-start">
+          <IntegrationsDropdown darkMode={darkMode} />
         </div>
       </div>
       {/* Carousel as background */}

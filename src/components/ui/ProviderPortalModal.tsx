@@ -22,6 +22,26 @@ interface ProviderPortalModalProps {
   darkMode?: boolean;
 }
 
+// Util to build Google OAuth consent URL (code flow) – top-level so all components can use it
+export const buildGoogleConsentUrl = (scopes: string[], state: string) => {
+  const cid = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const supaUrl = import.meta.env.VITE_SUPABASE_URL;
+  const redirect = import.meta.env.VITE_GOOGLE_REDIRECT_URI || `${import.meta.env.VITE_SUPABASE_URL}/auth/v1/callback`;
+  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  url.searchParams.set('client_id', cid);
+  url.searchParams.set('redirect_uri', redirect);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', scopes.join(' '));
+  url.searchParams.set('access_type', 'offline');
+  url.searchParams.set('prompt', 'consent');
+  url.searchParams.set('state', state);
+  url.searchParams.set('include_granted_scopes', 'true');
+  return url.toString();
+};
+
+console.log('[DEBUG] Google client', import.meta.env.VITE_GOOGLE_CLIENT_ID);
+console.log('[DEBUG] Redirect URI', buildGoogleConsentUrl(['scope'], 'state'));
+
 export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen, onClose, provider, darkMode }) => {
   const [server, setServer] = useState<MCPServer | null>(null);
   const [loading, setLoading] = useState(false);
@@ -137,7 +157,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
   // Check connection status on open
   useEffect(() => {
     const authenticated = !!user;
-    if (provider?.id === 'google_drive') {
+    if (provider?.id === 'google_drive' || provider?.id === 'google_calendar') {
       if (authenticated) {
         const token = localStorage.getItem('googleToken');
         setDriveConnected(!!token);
@@ -341,11 +361,14 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
               <AnthropicKeyManager darkMode={darkMode} feedback={anthropicFeedback} setFeedback={setAnthropicFeedback} testing={anthropicTesting} setTesting={setAnthropicTesting} />
             ) : provider.id === 'gemini' ? (
               <GeminiKeyManager darkMode={darkMode} feedback={geminiFeedback} setFeedback={setGeminiFeedback} testing={geminiTesting} setTesting={setGeminiTesting} />
-            ) : provider.id === 'google_drive' ? (
+            ) : (provider.id === 'google_drive' || provider.id === 'google_calendar') ? (
               googleAccessToken ? (
-                <span className="text-xs text-green-500">Connected as {userEmail || 'Google user'} via Supabase login</span>
+                <>
+                  <span className="text-xs text-green-500">Connected as {userEmail || 'Google user'} via Supabase login</span>
+                  <div className="mt-2"><DriveOAuthManager darkMode={darkMode} /></div>
+                </>
               ) : (
-                <span className="text-xs text-yellow-500">Not connected. Sign in first.</span>
+                <DriveOAuthManager darkMode={darkMode} />
               )
             ) : provider.id === 'gmail' ? (
               googleAccessToken ? (
@@ -569,6 +592,7 @@ const GeminiKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, 
 const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const [driveToken, setDriveToken] = React.useState('');
   const [driveEmail, setDriveEmail] = React.useState('');
+  const { user } = useAuth();
 
   React.useEffect(() => {
     const token = localStorage.getItem('googleToken') || '';
@@ -597,7 +621,7 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   }, []);
 
   const driveLogin = useGoogleLogin({
-    scope: 'https://www.googleapis.com/auth/drive.readonly',
+    scope: 'https://www.googleapis.com/auth/drive',
     flow: 'implicit',
     onSuccess: (tokenResponse) => {
       if (tokenResponse.access_token) {
@@ -621,6 +645,15 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     setDriveEmail('');
   };
 
+  const handleConnect = () => {
+    const scopes = [
+      'https://www.googleapis.com/auth/drive',
+      'https://www.googleapis.com/auth/gmail.modify',
+      'https://www.googleapis.com/auth/calendar'
+    ];
+    window.location.href = buildGoogleConsentUrl(scopes, user?.id || 'anon');
+  };
+
   return (
     <div className="flex flex-col space-y-2">
       <label className="text-xs font-medium">Google Drive Account</label>
@@ -630,9 +663,9 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           <Button onClick={handleDisconnect} variant="destructive" size="sm">Disconnect</Button>
         </>
       ) : (
-        <Button onClick={() => driveLogin()} className={`${darkMode ? 'bg-blue-700 text-white' : ''}`}>Connect Google Drive</Button>
+        <Button onClick={handleConnect} className={`${darkMode ? 'bg-blue-700 text-white' : ''}`}>Connect Google</Button>
       )}
-      <span className="text-xs text-gray-500">Connect any Google account for Drive integration. This is independent of app login.</span>
+      <span className="text-xs text-gray-500">Connect once to enable all Google providers (Drive, Gmail, etc.).</span>
     </div>
   );
 };
@@ -640,6 +673,7 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 const GmailOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const [gmailToken, setGmailToken] = React.useState('');
   const [gmailEmail, setGmailEmail] = React.useState('');
+  const { user: userAuth } = useAuth();
 
   React.useEffect(() => {
     const token = localStorage.getItem('gmailToken') || '';
@@ -673,6 +707,15 @@ const GmailOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     setGmailEmail('');
   };
 
+  const connectGmail = () => {
+    const scopes = [
+      'https://www.googleapis.com/auth/gmail.modify',
+      'https://www.googleapis.com/auth/drive',
+      'https://www.googleapis.com/auth/calendar'
+    ];
+    window.location.href = buildGoogleConsentUrl(scopes, userAuth?.id || 'anon');
+  };
+
   return (
     <div className="flex flex-col space-y-2">
       <label className="text-xs font-medium">Gmail Account</label>
@@ -682,14 +725,9 @@ const GmailOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           <Button onClick={handleDisconnect} variant="destructive" size="sm">Disconnect</Button>
         </>
       ) : (
-        <GoogleLogin
-          onSuccess={handleLoginSuccess}
-          onError={() => alert('Gmail login failed')}
-          useOneTap={false}
-          width={240}
-        />
+        <Button onClick={connectGmail} className={`${darkMode ? 'bg-blue-700 text-white' : ''}`}>Connect Google</Button>
       )}
-      <span className="text-xs text-gray-500">Connect any Google account for Gmail integration. This is independent of app login.</span>
+      <span className="text-xs text-gray-500">Connect once to enable Gmail commands.</span>
     </div>
   );
 };

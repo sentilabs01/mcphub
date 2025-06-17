@@ -124,7 +124,7 @@ export const AnimatedCarousel = ({
               <CarouselContent className="w-full justify-start">
                 {logoItems.map((logo, index) => (
                   <CarouselItem className={`basis-1/${itemsPerViewMobile} lg:basis-1/${itemsPerViewDesktop}`} key={index}>
-                    <div className={`flex rounded-md ${logoContainerWidth} ${logoContainerHeight} items-center justify-center p-4 hover:bg-accent transition-colors ${logoClassName}`}>
+                    <div className={`relative flex rounded-md ${logoContainerWidth} ${logoContainerHeight} items-center justify-center p-4 hover:bg-accent transition-colors ${logoClassName}`} style={{ zIndex: 1 }}>
                       {getProviderId(logo) ? (
                         <a
                           href={`/portal/${getProviderId(logo)}`}
@@ -134,7 +134,7 @@ export const AnimatedCarousel = ({
                             e.preventDefault();
                             handleLogoClick(logo);
                           }}
-                          className="focus:outline-none"
+                          className="focus:outline-none block w-full h-full"
                         >
                           <img
                             src={logo.src}

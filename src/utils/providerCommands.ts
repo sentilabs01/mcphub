@@ -169,4 +169,45 @@ export const PROVIDER_COMMANDS = {
       { label: 'Execute Workflow', value: '/n8n execute workflow' },
     ],
   },
+  google_calendar: {
+    homepage: 'https://calendar.google.com/',
+    commands: [
+      { label: 'List Events (today)', value: '/calendar list' },
+      { label: 'List Calendars', value: '/calendar calendars' },
+      { label: 'Create Event', value: '/calendar create "Meeting" 2024-01-01T10:00 2024-01-01T11:00' },
+      { label: 'Delete Event', value: '/calendar delete event_id' },
+    ],
+  },
+  bolt: {
+    homepage: 'https://bolt.dev/',
+    commands: [
+      { label: 'Search Web', value: '/bolt search <query>' },
+      { label: 'Summarize URL', value: '/bolt summarize <url>' },
+      { label: 'Automate Task', value: '/bolt automate <description>' },
+    ],
+  },
+  loveable: {
+    homepage: 'https://loveable.io/',
+    commands: [
+      { label: 'List Projects', value: '/loveable projects' },
+      { label: 'Create Project', value: '/loveable create-project "My App"' },
+      { label: 'Deploy', value: '/loveable deploy <project>' },
+    ],
+  },
+  cursor: {
+    homepage: 'https://cursor.sh/',
+    commands: [
+      { label: 'Open Repository', value: '/cursor open <repo-url>' },
+      { label: 'Search Code', value: '/cursor search <query>' },
+      { label: 'Code Complete', value: '/cursor complete <file>' },
+    ],
+  },
+  '21st_dev': {
+    homepage: 'https://21st.dev/',
+    commands: [
+      { label: 'Generate Component', value: '/21st_dev generate <component>' },
+      { label: 'List Components', value: '/21st_dev list' },
+      { label: 'Refactor', value: '/21st_dev refactor <file>' },
+    ],
+  },
 }; 

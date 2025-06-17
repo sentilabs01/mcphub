@@ -1,4 +1,4 @@
-# AI Hub
+# Slash / MCP
 
 ## 🚀 July 2025 Update – MCP Routing & Credential Quality-of-Life
 
@@ -72,7 +72,7 @@
 - See the original Contributing section below.
 
 ## Overview
-AI Hub is an integration platform and marketplace for AI-powered developer tools, focused on free and open tools, multi-account management, and Model Context Protocol (MCP) support. The platform features a modern gallery UI, always-on AI ChatBar (supporting OpenAI, Anthropic, Gemini), secure API key management (via Supabase), and command dropdowns for each provider.
+Slash / MCP is an integration platform and marketplace for AI-powered developer tools, focused on free and open tools, multi-account management, and Model Context Protocol (MCP) support. The platform features a modern gallery UI, always-on AI ChatBar (supporting OpenAI, Anthropic, Gemini), secure API key management (via Supabase), and command dropdowns for each provider.
 
 ---
 
