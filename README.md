@@ -296,3 +296,49 @@ Accept-Version: 2024-07-01
 Front-end sends these automatically via `src/services/mcpApiService.ts`.  If you call the gateway manually (e.g., cURL or Postman) include both headers.
 
 Async commands return **202 Accepted** with `{ jobId, eta }`.  The UI now polls `/job/{jobId}` until `{ done:true }`. 
+
+## Google Drive & Gmail OAuth Setup (July 2025)
+
+Follow these steps once to enable full-scope Google Drive and Gmail commands.
+
+1.  **Google Cloud credentials**  →  Console → APIs & Services → Credentials → *OAuth 2.0 Client ID (Web)*
+    * Authorised redirect URI **must** be
+      `https://<project-ref>.functions.supabase.co/google-oauth-complete`
+    * Copy the **Client ID** and **Client Secret**.
+2.  **Supabase secrets**
+    ```bash
+    npx supabase secrets set \
+      GOOGLE_CLIENT_ID="<client-id>" \
+      GOOGLE_CLIENT_SECRET="<client-secret>" \
+      GOOGLE_REDIRECT_URI="https://<project-ref>.functions.supabase.co/google-oauth-complete" \
+      APP_URL="http://localhost:5173" \
+      SERVICE_ROLE_KEY="<service-role-key>" \
+      --project-ref <project-ref>
+    ```
+    *`SERVICE_ROLE_KEY` is your project's **service-role** key – we intentionally avoid the `SUPABASE_` prefix because those env names are blocked.*
+3.  **Edge function config** – in `supabase/functions/google-oauth-complete/supabase.toml`
+    ```toml
+    [function]
+    verify_jwt = false   # allow unauthenticated Google callback
+    ```
+4.  **Deploy the function**
+    ```bash
+    npx supabase functions deploy google-oauth-complete --use-api \
+      --project-ref <project-ref>
+    ```
+5.  **Front-end env** – create `.env.local` (repo root)
+    ```ini
+    VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+    VITE_SUPABASE_ANON_KEY=<anon-public-key>
+    VITE_GOOGLE_CLIENT_ID=<client-id>
+    VITE_GOOGLE_REDIRECT_URI=https://<project-ref>.functions.supabase.co/google-oauth-complete
+    ```
+6.  **Run the app** → Integrations → Google Drive → **Connect Google**.
+    The first successful consent creates **two** rows in
+    `user_integration_accounts` (`google_drive`, `gmail`) containing
+    `{ token, refresh_token, expiry_ts }`.
+
+That's it—`/drive list files` and `/gmail list inbox` work out of the box and
+access tokens auto-refresh via the included refresh token.
+
+--- 
