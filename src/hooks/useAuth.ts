@@ -31,6 +31,14 @@ export const useAuthProvider = () => {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      // Persist Google provider token for Drive/Gmail helpers on first load
+      if (session?.provider_token) {
+        try {
+          localStorage.setItem('googleToken', session.provider_token);
+        } catch {
+          /* localStorage may be unavailable */
+        }
+      }
     });
 
     // Listen for auth changes
@@ -40,6 +48,11 @@ export const useAuthProvider = () => {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      if (session?.provider_token) {
+        try {
+          localStorage.setItem('googleToken', session.provider_token);
+        } catch {}
+      }
     });
 
     // Refresh Google provider_token ~2 min before expiry

@@ -31,6 +31,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, d
       .then((tkn) => {
         setGithubToken(tkn);
         setSaved(!!tkn);
+        if (tkn) {
+          try {
+            localStorage.setItem('github_token', tkn);
+          } catch {
+            /* ignore */
+          }
+        }
       })
       .finally(() => setLoading(false));
   }, [isOpen]);
@@ -41,6 +48,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, d
     try {
       await saveGithubToken(githubToken);
       setSaved(true);
+      try {
+        localStorage.setItem('github_token', githubToken);
+      } catch {}
       setFeedback('Token saved to your account.');
     } catch (err: any) {
       setFeedback(err.message || 'Failed to save token');
@@ -58,6 +68,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, d
       await deleteGithubToken();
       setGithubToken('');
       setSaved(false);
+      try { localStorage.removeItem('github_token'); } catch {}
       setFeedback('Token deleted.');
     } catch (err: any) {
       setFeedback(err.message || 'Failed to delete token');

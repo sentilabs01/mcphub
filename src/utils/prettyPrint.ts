@@ -14,55 +14,90 @@ export function prettyPrintResult(provider: string, data: any): string {
     const p = provider.toLowerCase();
     switch (p) {
       case 'google_drive': {
-        // API may return { files: [...] }
-        const files = Array.isArray(data) ? data : (data && (data as any).files);
+        // Accept shapes: array directly, { files: [...] }, { output: [...]|string }
+        let files: any = null;
+        if (Array.isArray(data)) files = data;
+        else if (data && Array.isArray((data as any).files)) files = (data as any).files;
+        else if (data && Array.isArray((data as any).output)) files = (data as any).output;
+        else if (data && typeof (data as any).output === 'string') {
+          // output string with newline-separated entries "id | name | mimeType"
+          files = (data as any).output.split(/\n+/).filter(Boolean).map((line: string) => {
+            const parts = line.split(/\s+\|\s+/);
+            return { id: parts[0], name: parts[1] || parts[0] };
+          });
+        }
         if (Array.isArray(files)) {
           if (files.length === 0) return 'No Drive files found.';
-          return files
-            .slice(0, 50)
-            .map((f: any, idx) => `${idx + 1}. ${f.name || 'Untitled'}  |  ID: ${f.id}`)
-            .join('\n');
+          return files.slice(0, 50).map((f: any, idx) => `${idx + 1}. ${f.name || 'Untitled'}`).join('\n');
         }
         break;
       }
       case 'gmail': {
-        // Result shapes: direct array OR { messages: [...] } OR { raw_response: { messages: [...] } }
+        // Accept array, { messages: [...] }, wrappers, { output: [...] }
         let msgs: any = null;
         if (Array.isArray(data)) msgs = data;
         else if (data && Array.isArray((data as any).messages)) msgs = (data as any).messages;
         else if (data && (data as any).raw_response && Array.isArray((data as any).raw_response.messages)) {
           msgs = (data as any).raw_response.messages;
+        } else if (data && Array.isArray((data as any).output)) {
+          msgs = (data as any).output;
         }
-
         if (Array.isArray(msgs)) {
           if (msgs.length === 0) return 'No emails matching your query.';
           return msgs
             .slice(0, 20)
             .map((m: any, idx) => {
-              const subject = m.subject || '';
-              const snippet = m.snippet || m.snippetText || '';
+              const subject = m.subject || m.snippet?.slice(0, 60) || '(no subject)';
               const from = m.from || m.sender || '';
-              const id = m.id || m.messageId || '';
               const date = m.date || m.internalDate || '';
-              const subjCol = (subject || '(no subject)').slice(0, 60).padEnd(60);
-              const fromCol = from.slice(0, 24).padEnd(24);
-              const dateCol = date.toString().slice(0, 16).padEnd(16);
-              const headerLine = `${idx + 1}. ${subjCol}  ${fromCol}  ${dateCol}  ID: ${id}`;
-              const snip = snippet && snippet !== subject ? `\n    ${snippet.slice(0, 120)}` : '';
-              return headerLine + snip;
+              return `${idx + 1}. ${subject}  |  ${from}  |  ${date}`;
             })
             .join('\n');
         }
         break;
       }
       case 'github': {
-        const repos = Array.isArray(data) ? data : (data && (data as any).repositories);
+        // Expand accepted shapes: direct array, { repositories: [...] }, { raw_response: [...] }, { raw_response: { repositories: [...] } }
+        let repos: any = null;
+        if (Array.isArray(data)) repos = data;
+        else if (data && Array.isArray((data as any).repositories)) repos = (data as any).repositories;
+        else if (data && Array.isArray((data as any).raw_response)) repos = (data as any).raw_response;
+        else if (data && (data as any).raw_response && Array.isArray((data as any).raw_response.repositories)) {
+          repos = (data as any).raw_response.repositories;
+        }
         if (Array.isArray(repos)) {
           if (repos.length === 0) return 'No repositories found.';
           return repos
             .slice(0, 30)
             .map((r: any, idx) => `${idx + 1}. ${r.full_name || r.name}`)
             .join('\n');
+        }
+        break;
+      }
+      case 'google_calendar': {
+        // Accept array of events or { items: [...] } etc.
+        if (typeof data === 'string') {
+          // Could already be prettified by backend
+          return data;
+        }
+        let events: any = null;
+        if (Array.isArray(data)) events = data;
+        else if (data && Array.isArray((data as any).items)) events = (data as any).items;
+        else if (data && (data as any).raw_response && Array.isArray((data as any).raw_response.items)) {
+          events = (data as any).raw_response.items;
+        } else if (data && Array.isArray((data as any).output)) {
+          events = (data as any).output;
+        }
+
+        if (Array.isArray(events)) {
+          if (events.length === 0) return 'No calendar events.';
+          return events.slice(0, 20).map((e: any, idx) => {
+            const startObj = e.start || {};
+            const rawStart = startObj.dateTime || startObj.date || '';
+            const dateStr = rawStart.toString().slice(0, 16);
+            const title = e.summary || '(no title)';
+            return `${idx + 1}. ${dateStr} | ${title}`;
+          }).join('\n');
         }
         break;
       }

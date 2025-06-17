@@ -15,10 +15,16 @@ import { ProviderPortalModal } from "./ProviderPortalModal";
 import { PROVIDERS } from "../../data/providers";
 import type { ProviderMeta } from "../../data/providers";
 
+// Providers to hide from carousel
+const HIDDEN_PROVIDER_IDS = new Set(["slack", "chroma", "jupyter"]);
+
+// Filtered list used throughout this component
+const ACTIVE_PROVIDERS = PROVIDERS.filter(p => !HIDDEN_PROVIDER_IDS.has(p.id));
+
 // Build default logo list from PROVIDERS (unique)
 const localLogos = Array.from(new Set([
-  ...PROVIDERS.map(p => p.logo),
-  ...PROVIDERS.flatMap(p => p.logoDark ? [p.logoDark] : [])
+  ...ACTIVE_PROVIDERS.map(p => p.logo),
+  ...ACTIVE_PROVIDERS.flatMap(p => (p.logoDark ? [p.logoDark] : []))
 ]));
 
 export const AnimatedCarousel = ({
@@ -93,7 +99,7 @@ export const AnimatedCarousel = ({
 
   const findProvider = (logo: { src: string; alt?: string }) => {
     // Try to match by logo src or alt (provider name, case-insensitive)
-    return PROVIDERS.find(p =>
+    return ACTIVE_PROVIDERS.find(p =>
       p.logo === logo.src || p.logoDark === logo.src ||
       (logo.alt && p.name.toLowerCase() === logo.alt.toLowerCase())
     );

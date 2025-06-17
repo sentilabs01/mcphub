@@ -602,22 +602,19 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
             return;
           }
         }
-        // reuse existing pretty print block using gmailResult instead of result
-        const result = gmailResult;
-        // Try to parse the assistant's message as JSON for marketplace filters
-        let parsed: any = null;
+        const formatted = prettyPrintResult('gmail', gmailResult);
+        // Attempt to parse any JSON from original (prettified may not be JSON)
         try {
-          parsed = JSON.parse(result);
+          const parsed: any = typeof gmailResult === 'string' ? JSON.parse(gmailResult) : gmailResult;
+          if (parsed && (parsed.category || parsed.tags || parsed.pricing)) {
+            setFilters(parsed);
+          }
         } catch {}
-        if (parsed && (parsed.category || parsed.tags || parsed.pricing)) {
-          // If the response is a filter object, set filters in context
-          setFilters(parsed);
-        }
         setMessages(prev => {
-          if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === result) {
+          if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === formatted) {
             return prev;
           }
-          return [...prev, { role: 'assistant', content: result }];
+          return [...prev, { role: 'assistant', content: formatted }];
         });
       }
       // --- Google Calendar Chat Commands ---

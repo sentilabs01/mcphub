@@ -1,7 +1,9 @@
 import { MarqueeLogos } from './MarqueeLogos';
 import { PROVIDERS } from '../../data/providers';
 
-const partnerLogos = PROVIDERS.map(p => ({ src: p.logo, alt: p.name }));
+const HIDDEN_PROVIDER_IDS = new Set(["slack", "chroma", "jupyter"]);
+
+const partnerLogos = PROVIDERS.filter(p => !HIDDEN_PROVIDER_IDS.has(p.id)).map(p => ({ src: p.logo, alt: p.name }));
 
 export const CarouselDemo = ({ darkMode }: { darkMode?: boolean }) => {
   return (
