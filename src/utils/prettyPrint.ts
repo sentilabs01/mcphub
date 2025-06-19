@@ -101,6 +101,13 @@ export function prettyPrintResult(provider: string, data: any): string {
         }
         break;
       }
+      case 'make_com': {
+        if (Array.isArray(data)) {
+          if (data.length === 0) return 'No scenarios found.';
+          return data.slice(0, 30).map((s:any, idx:number)=>`${idx+1}. ${s.id || s.uid || s.scenarioId}  ${s.name || s.label || ''}`).join('\n');
+        }
+        break;
+      }
       default:
         break;
     }

@@ -797,7 +797,34 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           return;
         }
 
-        // Command patterns
+        // ----- Command patterns -----
+        // 1. List scenarios
+        if (cleanCmd === 'list-scenarios' || cleanCmd === 'list') {
+          try {
+            const res = await fetch('http://localhost:3002/api/command', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                provider: 'make_mcp_list',
+                zone: makeZone,
+                token: makeToken,
+              }),
+            });
+            if (res.ok) {
+              const json = await res.json();
+              setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('make_com', json) }]);
+            } else {
+              const txt = await res.text();
+              setMessages(prev => [...prev, { role: 'assistant', content: `Make list error (${res.status}): ${txt}` }]);
+            }
+          } catch (err: any) {
+            setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to list scenarios.' }]);
+          }
+          setLoading(false);
+          return;
+        }
+
+        // 2. Webhook pattern
         const webhookMatch = cleanCmdRaw.match(/webhook\s+(.+)/i);
         if (webhookMatch) {
           const hookUrl = webhookMatch[1].trim();

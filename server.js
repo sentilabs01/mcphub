@@ -199,6 +199,20 @@ const commandController = async (req, res) => {
           return res.status(500).json({ error: err.message || 'fetch failed' });
         }
       }
+      case 'make_mcp_list': {
+        const { zone, token } = req.body;
+        if (!zone || !token) return res.status(400).json({ error: 'zone and token required' });
+        const url = `https://${zone}/mcp/api/v1/u/${token}/scenarios`;
+        try {
+          const r = await fetch(url, { headers: { Accept: 'application/json' } });
+          const text = await r.text();
+          let json;
+          try { json = JSON.parse(text); } catch { json = { raw: text }; }
+          return res.status(r.status).json(json);
+        } catch (err) {
+          return res.status(500).json({ error: err.message || 'fetch failed' });
+        }
+      }
       default:
         return res.status(400).json({ error: 'Unsupported provider' });
     }
