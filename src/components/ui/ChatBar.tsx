@@ -23,6 +23,7 @@ import { jwtDecode } from 'jwt-decode';
 import { getUserIntegrationAccounts } from '../../services/userIntegrationAccountsService';
 import { prettyPrintResult } from '../../utils/prettyPrint';
 import { getCredential } from '../../services/credentialsService';
+import { listZapierZaps, listZapierActions } from '../../services/zapierNLAService';
 
 const PROVIDER_OPTIONS: { label: string; value: LLMProvider }[] = [
   { label: 'OpenAI', value: 'openai' },
@@ -202,6 +203,11 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
               localStorage.setItem('zapierApiKey', tok);
             }
             localStorage.setItem(`${acc.provider}_token`, tok);
+            // Special mapping for Make.com so chat handler picks it up
+            if (acc.provider === 'make_com') {
+              localStorage.setItem('makeToken', tok);
+              if (creds.zone) localStorage.setItem('makeZone', creds.zone);
+            }
           }
         });
       } catch (err) {
@@ -465,7 +471,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         if (!driveToken && user) {
           try {
             const rec = await getCredential(user.id, 'google_drive');
-            driveToken = rec?.credentials?.token || rec?.credentials?.accessToken || '';
+            driveToken = rec?.credentials?.token || rec?.credentials?.access_token || rec?.credentials?.accessToken || '';
           } catch {}
         }
 
@@ -550,7 +556,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         if (!gmailToken && user) {
           try {
             const rec = await getCredential(user.id, 'gmail');
-            gmailToken = rec?.credentials?.token || rec?.credentials?.accessToken || '';
+            gmailToken = rec?.credentials?.token || rec?.credentials?.access_token || rec?.credentials?.accessToken || '';
           } catch {}
         }
 
@@ -625,7 +631,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         if (calCmd === '' || calCmd === 'list events' || calCmd === 'list my events' || calCmd === 'events today') {
           calCmd = 'list-events';
         }
-        if (calCmd === 'list calendars' || calCmd === 'calendars') {
+        if (calCmd === 'list calendars' || calCmd === 'calendars' || calCmd === 'get calendar' || calCmd === 'get calendars') {
           calCmd = 'list-calendars';
         }
 
@@ -636,7 +642,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
             const recCal = await getCredential(user.id, 'google_calendar');
             const recDrive = await getCredential(user.id, 'google_drive');
             const recGmail = await getCredential(user.id, 'gmail');
-            calToken = recCal?.credentials?.token || recDrive?.credentials?.token || recGmail?.credentials?.token || '';
+            calToken = recCal?.credentials?.token || recCal?.credentials?.access_token || recDrive?.credentials?.token || recDrive?.credentials?.access_token || recGmail?.credentials?.token || recGmail?.credentials?.access_token || '';
           } catch {}
         }
 
@@ -665,9 +671,6 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       // --- End Google Calendar Chat Commands ---
       // --- Zapier Chat Commands (AI Actions / NLA) ---
       if (processedInput.startsWith('/zapier')) {
-        const cleanZapierCmdRaw = processedInput.replace(/^\/zapier\s*/i, '').trim();
-        // Backend expects kebab-case slugs (e.g. list-zaps, trigger-zap-<id>)
-        const cleanZapierCmd = cleanZapierCmdRaw.toLowerCase().replace(/\s+/g, '-');
         const zapierToken = localStorage.getItem('zapierApiKey') || localStorage.getItem('zapier_token') || '';
         if (!zapierToken) {
           setMessages(prev => [...prev, { role: 'assistant', content: 'Please enter your Zapier API Key in the Integrations panel.' }]);
@@ -675,19 +678,162 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           return;
         }
 
-        // Route to MCP server for Zapier (NLA)
-        const server = await MCPServerService.getServerById('zapier');
+        const cmdBody = processedInput.replace(/^\/zapier\s*/i, '').trim();
+
+        try {
+          // Basic router for common commands
+          if (/^list\s+zaps?/i.test(cmdBody)) {
+            const data = await listZapierZaps(zapierToken);
+            setMessages(prev => [...prev, { role: 'assistant', content: JSON.stringify(data, null, 2) }]);
+          } else if (/^list\s+actions?/i.test(cmdBody)) {
+            const data = await listZapierActions(zapierToken);
+            setMessages(prev => [...prev, { role: 'assistant', content: JSON.stringify(data, null, 2) }]);
+          } else {
+            setMessages(prev => [...prev, { role: 'assistant', content: 'Unknown Zapier command. Try "list zaps" or "list actions".' }]);
+          }
+        } catch (err: any) {
+          setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Zapier request failed.' }]);
+        }
+        setLoading(false);
+        return;
+      }
+      // --- n8n Chat Commands ---
+      if (processedInput.startsWith('/n8n')) {
+        const cleanCmdRaw = processedInput.replace(/^\/n8n\s*/i, '').trim();
+        const cleanCmd = cleanCmdRaw.toLowerCase().replace(/\s+/g, '-');
+        let n8nToken = localStorage.getItem('n8nApiKey') || localStorage.getItem('n8n_token') || '';
+        if (!n8nToken && user) {
+          try {
+            const rec: any = await getCredential(user.id, 'n8n');
+            n8nToken = rec?.credentials?.apiKey || '';
+          } catch {}
+        }
+        const n8nBaseUrl = localStorage.getItem('n8nBaseUrl') || '';
+        if (!n8nBaseUrl) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Please set your n8n Base URL in the Integrations panel.' }]);
+          setLoading(false);
+          return;
+        }
+        // Find MCP server by provider id
+        const server = await MCPServerService.getServerById('n8n');
         if (!server || !server.apiUrl) {
-          setMessages(prev => [...prev, { role: 'assistant', content: 'Zapier MCP server not found.' }]);
+          setMessages(prev => [...prev, { role: 'assistant', content: 'n8n MCP server not found.' }]);
           setLoading(false);
           return;
         }
         try {
-          const result = await runMCPCommand(server.apiUrl, zapierToken, cleanZapierCmd, {}, 'zapier');
+          const result = await runMCPCommand(server.apiUrl, n8nToken, cleanCmd, {}, 'n8n');
           setMessages(prev => [...prev, { role: 'assistant', content: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }]);
         } catch (err: any) {
-          setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Zapier command.' }]);
+          setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run n8n command.' }]);
         }
+        setLoading(false);
+        return;
+      }
+      // --- Make.com Chat Commands ---
+      if (processedInput.startsWith('/make_com') || processedInput.startsWith('/make')) {
+        const cleanCmdRaw = processedInput.replace(/^\/(make_com|make)\s*/i, '').trim();
+        const cleanCmd = cleanCmdRaw.toLowerCase().replace(/\s+/g, '-');
+        let makeZone   = localStorage.getItem('makeZone')   || '';
+        let makeToken = localStorage.getItem('makeToken') || '';
+        const makeTokenType = localStorage.getItem('makeTokenType') || 'mcp';
+        if ((!makeZone || !makeToken) && user) {
+          try {
+            const rec: any = await getCredential(user.id, 'make_com');
+            if (rec) {
+              if (!makeZone) {
+                makeZone = rec.credentials.zone || '';
+                localStorage.setItem('makeZone', makeZone);
+              }
+              if (!makeToken) localStorage.setItem('makeToken', rec.credentials.token || '');
+              makeToken = rec.credentials.token || '';
+            }
+          } catch {}
+        }
+        if (!makeZone || !makeToken) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Please enter your Make MCP token in the Integrations panel.' }]);
+          setLoading(false);
+          return;
+        }
+
+        // Command patterns
+        const webhookMatch = cleanCmdRaw.match(/webhook\s+(.+)/i);
+        if (webhookMatch) {
+          const hookUrl = webhookMatch[1].trim();
+          const url = hookUrl.startsWith('http') ? hookUrl : '';
+          if (!url) {
+            setMessages(prev => [...prev, { role: 'assistant', content: 'Please provide a full Make webhook URL starting with https://hook.' }]);
+            setLoading(false);
+            return;
+          }
+          try {
+            const res = await fetch('http://localhost:3002/api/command', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ provider: 'make_webhook', url })
+            });
+            if (res.ok) {
+              setMessages(prev => [...prev, { role: 'assistant', content: 'Webhook triggered ✅' }]);
+            } else {
+              const txt = await res.text();
+              setMessages(prev => [...prev, { role: 'assistant', content: `Make webhook error (${res.status}): ${txt}` }]);
+            }
+          } catch (err: any) {
+            setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to trigger webhook.' }]);
+          }
+          setLoading(false);
+          return;
+        }
+
+        const runMatch = cleanCmdRaw.match(/(?:run|execute(?:\s+workflow)?)(?:\s+)(\d+)/i);
+        if (runMatch) {
+          const scenarioId = runMatch[1];
+          try {
+            let res: Response;
+            if (makeTokenType === 'api') {
+              // Use local gateway to avoid CORS
+              res = await fetch('http://localhost:3002/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  provider: 'make_api_run',
+                  token: makeToken,
+                  scenarioId,
+                }),
+              });
+            } else {
+              // Use local MCP gateway with MCP token
+              res = await fetch('http://localhost:3002/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  provider: 'make_mcp_run',
+                  zone: makeZone,
+                  token: makeToken,
+                  scenarioId,
+                }),
+              });
+            }
+            if (res.ok) {
+              setMessages(prev => [...prev, { role: 'assistant', content: `Scenario ${scenarioId} started ✅` }]);
+            } else {
+              let errMsg = `${res.status}`;
+              try {
+                const j = await res.json();
+                errMsg = JSON.stringify(j);
+              } catch {
+                errMsg = await res.text();
+              }
+              setMessages(prev => [...prev, { role: 'assistant', content: `Make error (${res.status}): ${errMsg}` }]);
+            }
+          } catch (err: any) {
+            setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run scenario.' }]);
+          }
+          setLoading(false);
+          return;
+        }
+
+        setMessages(prev => [...prev, { role: 'assistant', content: 'Unknown Make command. Use "make run <scenarioId>".' }]);
         setLoading(false);
         return;
       }

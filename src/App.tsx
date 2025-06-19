@@ -26,7 +26,9 @@ import { IntegrationsDropdown } from './components/ui/IntegrationsDropdown';
 // import { GoogleLogin, googleLogout } from '@react-oauth/google';
 // import { jwtDecode } from 'jwt-decode';
 
-const GOOGLE_CLIENT_ID = '652950111934-...apps.googleusercontent.com';
+// Use env variable to avoid stale hard-coded IDs
+// Ensure VITE_GOOGLE_CLIENT_ID is defined in your .env (and re-start Vite after editing)
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string || '';
 
 function MinimalAppContent() {
   const { user, loading, signOut } = useAuth();

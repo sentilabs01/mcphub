@@ -92,9 +92,9 @@ export const useAuthProvider = () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        // full Gmail + Drive scopes
+        // full Gmail + Drive + Calendar scopes
         scopes:
-          'https://mail.google.com/ https://www.googleapis.com/auth/drive',
+          'https://mail.google.com/ https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/calendar',
         // force a fresh consent + refresh-token
         queryParams: { access_type: 'offline', prompt: 'consent' },
         redirectTo: `${window.location.origin}/auth/callback`,
@@ -104,8 +104,32 @@ export const useAuthProvider = () => {
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    try {
+      await supabase.auth.signOut();
+    } catch (err: any) {
+      // If Supabase already invalidated the session we still proceed
+      if (err?.status !== 400 && err?.status !== 403) {
+        throw err;
+      }
+    } finally {
+      // Clear local state & storage regardless of API outcome
+      setSession(null);
+      setUser(null);
+      try {
+        localStorage.removeItem('googleToken');
+        // Remove Supabase auth tokens (access + refresh)
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
+            localStorage.removeItem(key);
+          }
+          if (key.startsWith('sb-') && key.endsWith('-refresh-token')) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch {/* ignore */}
+      // Small delay to allow UI to update then hard-refresh (optional)
+      setTimeout(() => window.location.reload(), 50);
+    }
   };
 
   return {
