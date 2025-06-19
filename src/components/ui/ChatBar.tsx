@@ -140,6 +140,41 @@ function parseGmailIntent(input: string): string | null {
   return null;
 }
 
+// Lightweight NLP for simple calendar phrases without the /google_calendar prefix
+function parseCalendarIntent(input: string): string | null {
+  const txt = input.toLowerCase().trim();
+  // "get calendar", "show calendar", "list calendar events" etc.
+  if (/^(get|show|list)( my)? calendar( events)?$/.test(txt)) {
+    return '/google_calendar list-events';
+  }
+  // "list calendars", "get calendars"
+  if (/^(get|list) calendars$/.test(txt)) {
+    return '/google_calendar list-calendars';
+  }
+  return null;
+}
+
+// Zapier: "get zaps", "list zaps", "list actions"
+function parseZapierIntent(input: string): string | null {
+  const txt = input.toLowerCase().trim();
+  if (/^(get|list) zaps?$/i.test(txt)) {
+    return '/zapier list zaps';
+  }
+  if (/^(get|list) actions?$/i.test(txt)) {
+    return '/zapier list actions';
+  }
+  return null;
+}
+
+// Make.com: "get scenarios", "list scenarios"
+function parseMakeIntent(input: string): string | null {
+  const txt = input.toLowerCase().trim();
+  if (/^(get|list) scen(arios)?$/i.test(txt)) {
+    return '/make list-scenarios';
+  }
+  return null;
+}
+
 export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const { user, session } = useAuth();
   const { setFilters } = useMarketplaceSearch();
@@ -363,7 +398,13 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     const maybeDrive = parseDriveIntent(processedInput);
     if (maybeDrive) processedInput = maybeDrive;
     const maybeGmail = parseGmailIntent(processedInput);
+    const maybeCalendar = parseCalendarIntent(processedInput);
+    const maybeZapier = parseZapierIntent(processedInput);
+    const maybeMake = parseMakeIntent(processedInput);
     if (maybeGmail) processedInput = maybeGmail;
+    else if (maybeCalendar) processedInput = maybeCalendar;
+    else if (maybeZapier) processedInput = maybeZapier;
+    else if (maybeMake) processedInput = maybeMake;
     setCommandHistory(prev => {
       const next = [...prev, processedInput].slice(-50); // cap at 50
       localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
