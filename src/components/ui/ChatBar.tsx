@@ -24,6 +24,9 @@ import { getUserIntegrationAccounts } from '../../services/userIntegrationAccoun
 import { prettyPrintResult } from '../../utils/prettyPrint';
 import { getCredential } from '../../services/credentialsService';
 import { listZapierZaps, listZapierActions } from '../../services/zapierNLAService';
+import { splitMcpEndpoint } from '../../utils/zapier';
+import { safeGet } from '../../utils/safeLocal';
+import { fetchStoredSlackToken } from '../../services/slackService';
 
 const PROVIDER_OPTIONS: { label: string; value: LLMProvider }[] = [
   { label: 'OpenAI', value: 'openai' },
@@ -157,12 +160,14 @@ function parseCalendarIntent(input: string): string | null {
 // Zapier: "get zaps", "list zaps", "list actions"
 function parseZapierIntent(input: string): string | null {
   const txt = input.toLowerCase().trim();
-  if (/^(get|list) zaps?$/i.test(txt)) {
+  if (/^(get|list)(\s+|-)?zaps?$/i.test(txt)) {
     return '/zapier list zaps';
   }
-  if (/^(get|list) actions?$/i.test(txt)) {
+  if (/^(get|list)(\s+|-)?actions?$/i.test(txt)) {
     return '/zapier list actions';
   }
+  const runMatch = txt.match(/^(run|trigger)\s+zap\s+(\S+)/i);
+  if (runMatch) return `/zapier run zap ${runMatch[2]}`;
   return null;
 }
 
@@ -318,7 +323,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
             // Determine token for provider when required (best-effort)
             let token = '';
             if (providerKey === 'github') {
-              token = localStorage.getItem('github_token') || '';
+              token = safeGet('github_token');
               if (!token && user) {
                 const rec = await getCredential(user.id, 'github');
                 token = rec?.credentials?.token || '';
@@ -415,6 +420,10 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     setInput('');
     setLoading(true);
     setError(null);
+
+    // Dispatch start event for observability
+    window.dispatchEvent(new CustomEvent('mcp:command-start', { detail: { input: processedInput } }));
+
     try {
       // --- GitHub Chat Commands ---
       const githubIntent = parseGithubIntent(processedInput);
@@ -437,15 +446,10 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           cmdBody = cmdBody.replace(/\s+/g, ' ').trim();
         }
         // Use MCP protocol for GitHub commands
-        let githubToken = localStorage.getItem('github_token') || '';
+        let githubToken = safeGet('github_token');
         if (!githubToken && user) {
           const rec = await getCredential(user.id, 'github');
           githubToken = rec?.credentials?.token || '';
-        }
-        if (!githubToken) {
-          setMessages(prev => [...prev, { role: 'assistant', content: 'Please enter your GitHub Personal Access Token in the Integrations panel.' }]);
-          setLoading(false);
-          return;
         }
         // Get MCP server for GitHub
         const server = await MCPServerService.getServerById('github');
@@ -483,9 +487,51 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run GitHub command.' }]);
         }
         setLoading(false);
+        window.dispatchEvent(new CustomEvent('mcp:command-end', { detail: { input: processedInput } }));
         return;
       }
       // --- End GitHub Chat Commands ---
+
+      // --- Slack Chat Commands ---
+      if (processedInput.startsWith('/slack')) {
+        const raw = processedInput.replace(/^\/slack\s*/i, '').trim();
+        // Keep spaces; backend expects space-separated slugs (e.g. "connections open"). Lower-case for consistency
+        const slackCmd = raw.toLowerCase();
+
+        // Retrieve Slack token – localStorage first, then Supabase creds
+        let slackToken: string = localStorage.getItem('slack_token') || '';
+        if (!slackToken) {
+          // Try backend store
+          slackToken = await fetchStoredSlackToken();
+        }
+
+        if (!slackToken) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Please save a Slack token in the Slack portal first.' }]);
+          setLoading(false);
+          return;
+        }
+
+        // Call Slack MCP server
+        const server = await MCPServerService.getServerById('slack');
+        if (!server || !server.apiUrl) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Slack MCP server not found.' }]);
+          setLoading(false);
+          return;
+        }
+
+        try {
+          const result = await runMCPCommand(server.apiUrl, slackToken, slackCmd, {}, 'slack');
+          setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('slack', result) }]);
+        } catch (err: any) {
+          setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Slack command.' }]);
+        }
+
+        setLoading(false);
+        window.dispatchEvent(new CustomEvent('mcp:command-end', { detail: { input: processedInput } }));
+        return;
+      }
+      // --- End Slack Chat Commands ---
+
       // --- Google Drive Chat Commands ---
       if (processedInput.startsWith('/drive') || processedInput.startsWith('/google_drive')) {
         // Normalize the command by stripping the prefix and converting common phrases to kebab-case slugs
@@ -509,11 +555,9 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         // Only use Supabase session provider_token if it looks like a Google OAuth access token
         const maybeGoogleTok = googleToken && googleToken.startsWith('ya29') ? googleToken : '';
         let driveToken: string = localStorage.getItem('google_drive_token') || localStorage.getItem('gmail_token') || maybeGoogleTok;
-        if (!driveToken && user) {
-          try {
-            const rec = await getCredential(user.id, 'google_drive');
-            driveToken = rec?.credentials?.token || rec?.credentials?.access_token || rec?.credentials?.accessToken || '';
-          } catch {}
+        if (!driveToken) {
+          const { fetchGoogleAccessToken } = await import('../../services/googleToken');
+          driveToken = await fetchGoogleAccessToken();
         }
 
         if (!driveToken) {
@@ -594,11 +638,9 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 
         const maybeGoogleTok2 = googleToken && googleToken.startsWith('ya29') ? googleToken : '';
         let gmailToken: string = localStorage.getItem('gmail_token') || localStorage.getItem('google_drive_token') || maybeGoogleTok2;
-        if (!gmailToken && user) {
-          try {
-            const rec = await getCredential(user.id, 'gmail');
-            gmailToken = rec?.credentials?.token || rec?.credentials?.access_token || rec?.credentials?.accessToken || '';
-          } catch {}
+        if (!gmailToken) {
+          const { fetchGoogleAccessToken } = await import('../../services/googleToken');
+          gmailToken = await fetchGoogleAccessToken();
         }
 
         if (!gmailToken) {
@@ -721,16 +763,61 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 
         const cmdBody = processedInput.replace(/^\/zapier\s*/i, '').trim();
 
+        // Prefer stored base/token, but fall back to single MCP endpoint URL
+        let mcpUrl: string = localStorage.getItem('zapier_mcp_url') || '';
+        let mcpToken: string = localStorage.getItem('zapier_mcp_token') || '';
+        if ((!mcpUrl || !mcpToken) && typeof window !== 'undefined') {
+          const fullEndpoint = localStorage.getItem('zapier_mcp_endpoint') || '';
+          if (fullEndpoint) {
+            const parsed = splitMcpEndpoint(fullEndpoint);
+            if (parsed) {
+              mcpUrl = parsed.base;
+              mcpToken = parsed.token;
+              // Cache for next runs
+              localStorage.setItem('zapier_mcp_url', mcpUrl);
+              localStorage.setItem('zapier_mcp_token', mcpToken);
+            }
+          }
+        }
+
         try {
-          // Basic router for common commands
-          if (/^list\s+zaps?/i.test(cmdBody)) {
-            const data = await listZapierZaps(zapierToken);
-            setMessages(prev => [...prev, { role: 'assistant', content: JSON.stringify(data, null, 2) }]);
-          } else if (/^list\s+actions?/i.test(cmdBody)) {
-            const data = await listZapierActions(zapierToken);
-            setMessages(prev => [...prev, { role: 'assistant', content: JSON.stringify(data, null, 2) }]);
+          if (mcpUrl && mcpToken) {
+            // Route via gateway to avoid CORS
+            const res = await fetch('http://localhost:3002/api/command', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                provider: 'zapier_mcp_cmd',
+                url: mcpUrl,
+                token: mcpToken,
+                command: (() => {
+                  // normalise
+                  const txt = cmdBody.trim();
+                  if (/^list(?:\s+|-)zaps?$/i.test(txt)) return 'zapier_manager.list_zaps';
+                  if (/^list(?:\s+|-)actions?$/i.test(txt)) return 'zapier.list-actions';
+                  // If user typed a full slug (contains dot) use it as-is
+                  if (/[a-z0-9]\.[a-z0-9]/i.test(txt)) return txt;
+                  return txt; // default passthrough
+                })()
+              })
+            });
+            const json = await res.json();
+            if (res.ok) {
+              setMessages(prev => [...prev, { role: 'assistant', content: JSON.stringify(json, null, 2) }]);
+            } else {
+              setMessages(prev => [...prev, { role: 'assistant', content: `Zapier MCP error (${res.status}): ${JSON.stringify(json)}` }]);
+            }
           } else {
-            setMessages(prev => [...prev, { role: 'assistant', content: 'Unknown Zapier command. Try "list zaps" or "list actions".' }]);
+            // Fallback to NLA helpers (requires zapierToken)
+            if (/^list(?:\s+|-)zaps?/i.test(cmdBody)) {
+              const data = await listZapierZaps(zapierToken);
+              setMessages(prev => [...prev, { role: 'assistant', content: JSON.stringify(data, null, 2) }]);
+            } else if (/^list(?:\s+|-)actions?/i.test(cmdBody)) {
+              const data = await listZapierActions(zapierToken);
+              setMessages(prev => [...prev, { role: 'assistant', content: JSON.stringify(data, null, 2) }]);
+            } else {
+              setMessages(prev => [...prev, { role: 'assistant', content: 'Unknown Zapier command. Try "list zaps" or "list actions".' }]);
+            }
           }
         } catch (err: any) {
           setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Zapier request failed.' }]);
@@ -968,6 +1055,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       });
     } catch (err: any) {
       setError(err.message || 'Failed to send message');
+      window.dispatchEvent(new CustomEvent('mcp:command-error', { detail: { input: processedInput, error: err?.message || String(err) } }));
     } finally {
       setLoading(false);
       inFlightRef.current = false; // release lock

@@ -5,7 +5,21 @@
 - **Google OAuth auto-refresh** is now baked into `useAuth`.  The browser silently renews the Google `provider_token` two minutes before expiry and stores the fresh token in `localStorage.googleToken`. Drive/Gmail commands never break.
 - **GitHub credential fallback**: the UI now fetches the Personal-Access-Token from Supabase (`user_credentials`) when not found in `localStorage`, so multi-device sessions Just Work™.
 - **Native GitHub MCP micro-service**: `backend/providers/github.js` handles `list-repos`, `get-issues`, `create-issue`.  Supabase `mcp_servers.id = 'github'` already points to `http://localhost:3001/api` – no code change needed in the front-end.
-- **Pretty-print results**: Smart-Chat turns arrays returned by MCP into tidy numbered lists (repos, Drive files, Gmail messages). Placeholders are now summarised instead of dumping raw JSON.
+- **Google Calendar integration (read & write)**: ChatBar now supports `/calendar` commands through the MCP server. Full token scopes are requested automatically and events are displayed via pretty-print.
+- **Pretty-print results**: Smart-Chat formats arrays from MCP into tidy numbered lists (repos, Drive files, Gmail/GCal items) instead of raw JSON.
+
+### New this week (June 20-25)
+
+* **Slack natural-language commands** – backend now handles
+  * `list channels` / `channels`
+  * `send #general hello world`
+  * `get messages #general 10`
+  so the UI no longer shows *Unsupported Slack command* when the correct `xoxb-` token is present.
+* **Persistent Google OAuth** – a shared refresh-token is stored in
+  `user_integration_accounts (provider = 'google', account_label = 'default')` and a new
+  `/api/google/token` endpoint hands out fresh access-tokens.  Front-end helper
+  `fetchGoogleAccessToken()` caches the token in `localStorage.google_access_token`,
+  so Drive / Gmail / Calendar commands survive page reloads and new tabs.
 
 ### 👋 A note for Manus (next-phase lead)
 
@@ -235,110 +249,3 @@ The UI supports slash‐commands for Zapier via the MCP gateway.
     /zapier list zaps
     /zapier trigger zap <id>
     ```
-
-## Storybook
-
-Storybook is available for rapid UI iteration of provider portals and common components.
-
-```bash
-# Start storybook on port 6006
-npm run storybook
-```
-
-If you add a new provider portal component place it under `src/components/ui/provider-portals/<ProviderName>.tsx` and ensure you export a `<ProviderName>Portal>` story.
-
-## Development quick-start
-
-```bash
-# 1.  Front-end
-npm install
-npm run dev        # localhost:5173
-
-# 2.  Local MCP gateway (optional stub)
-npm run api        # localhost:3001 (only needed if real MCP not running)
-```
-
-## Publishing
-
-This repo uses the standard GitHub flow:
-
-1.  Create a feature branch (`feat/zapier-support`).
-2.  Commit your changes, open a PR.
-3.  CI (GitHub Actions) will lint & type-check.
-4.  Merge to `main` after review.
-
-> **Tip**: The stub `server.js` is for local dev only – do **not** deploy it to production. Remove it from the branch if you are targeting the real MCP server. 
-
-### 🚦 MCP Quick-Command Cheat Sheet (GitHub)
-
-| Natural language | Slash form | Routed command string |
-|------------------|-----------|------------------------|
-| **List repos**                 | `/github list repos`                | `list-repos` |
-| **Create repo** `my-demo`      | `/github create repo my-demo`       | `create-repo my-demo` |
-| **Create issue** `owner/repo` *"Bug title" "Body"* | `/github create issue owner/repo "Bug title" "Body"` | `create-issue owner/repo` + args JSON |
-| **List issues** `owner/repo`   | `/github list issues owner/repo`    | `list-issues owner/repo` |
-
-> A **GitHub Personal-Access-Token** with `repo` scope must be stored in the Integrations panel (it's sent as `Authorization: Bearer …`).
-
-The same pattern applies to other providers (`/drive`, `/gmail`, etc.).
-
----
-
-### 🔑 Auth & Version headers
-
-Since **July 2024** the gateway expects:
-
-```http
-Authorization: Bearer <provider_token>
-Accept-Version: 2024-07-01
-```
-
-Front-end sends these automatically via `src/services/mcpApiService.ts`.  If you call the gateway manually (e.g., cURL or Postman) include both headers.
-
-Async commands return **202 Accepted** with `{ jobId, eta }`.  The UI now polls `/job/{jobId}` until `{ done:true }`. 
-
-## Google Drive & Gmail OAuth Setup (July 2025)
-
-Follow these steps once to enable full-scope Google Drive and Gmail commands.
-
-1.  **Google Cloud credentials**  →  Console → APIs & Services → Credentials → *OAuth 2.0 Client ID (Web)*
-    * Authorised redirect URI **must** be
-      `https://<project-ref>.functions.supabase.co/google-oauth-complete`
-    * Copy the **Client ID** and **Client Secret**.
-2.  **Supabase secrets**
-    ```bash
-    npx supabase secrets set \
-      GOOGLE_CLIENT_ID="<client-id>" \
-      GOOGLE_CLIENT_SECRET="<client-secret>" \
-      GOOGLE_REDIRECT_URI="https://<project-ref>.functions.supabase.co/google-oauth-complete" \
-      APP_URL="http://localhost:5173" \
-      SERVICE_ROLE_KEY="<service-role-key>" \
-      --project-ref <project-ref>
-    ```
-    *`SERVICE_ROLE_KEY` is your project's **service-role** key – we intentionally avoid the `SUPABASE_` prefix because those env names are blocked.*
-3.  **Edge function config** – in `supabase/functions/google-oauth-complete/supabase.toml`
-    ```toml
-    [function]
-    verify_jwt = false   # allow unauthenticated Google callback
-    ```
-4.  **Deploy the function**
-    ```bash
-    npx supabase functions deploy google-oauth-complete --use-api \
-      --project-ref <project-ref>
-    ```
-5.  **Front-end env** – create `.env.local` (repo root)
-    ```ini
-    VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-    VITE_SUPABASE_ANON_KEY=<anon-public-key>
-    VITE_GOOGLE_CLIENT_ID=<client-id>
-    VITE_GOOGLE_REDIRECT_URI=https://<project-ref>.functions.supabase.co/google-oauth-complete
-    ```
-6.  **Run the app** → Integrations → Google Drive → **Connect Google**.
-    The first successful consent creates **two** rows in
-    `user_integration_accounts` (`google_drive`, `gmail`) containing
-    `{ token, refresh_token, expiry_ts }`.
-
-That's it—`/drive list files` and `/gmail list inbox` work out of the box and
-access tokens auto-refresh via the included refresh token.
-
---- 
