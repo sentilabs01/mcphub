@@ -16,7 +16,7 @@ import { PROVIDERS } from "../../data/providers";
 import type { ProviderMeta } from "../../data/providers";
 
 // Providers to hide from carousel
-const HIDDEN_PROVIDER_IDS = new Set(["slack", "chroma", "jupyter"]);
+const HIDDEN_PROVIDER_IDS = new Set(["chroma", "jupyter", "figma", "bolt", "21st_dev"]);
 
 // Filtered list used throughout this component
 const ACTIVE_PROVIDERS = PROVIDERS.filter(p => !HIDDEN_PROVIDER_IDS.has(p.id));
@@ -77,12 +77,14 @@ export const AnimatedCarousel = ({
     '/logos/chatgptWHT.png': '/logos/openai-icon-505x512-pr6amibw.png',
     '/logos/anthropicwhiteSymbol.png': '/logos/anthropic-icon-tdvkiqisswbrmtkiygb0ia.webp',
     '/logos/github.png': '/logos/Octicons-mark-github.svg',
+    '/logos/cursor.png': '/logos/cursor light mode(1).png',
   };
 
   const colorToWhite: Record<string, string> = {
     '/logos/openai-icon-505x512-pr6amibw.png': '/logos/chatgptWHT.png',
     '/logos/anthropic-icon-tdvkiqisswbrmtkiygb0ia.webp': '/logos/anthropicwhiteSymbol.png',
     '/logos/Octicons-mark-github.svg': '/logos/github.png',
+    '/logos/cursor light mode(1).png': '/logos/cursor.png',
   };
 
   const logoItems = (logos || localLogos).map(raw => {
@@ -145,14 +147,14 @@ export const AnimatedCarousel = ({
                           <img
                             src={logo.src}
                             alt={logo.alt || `Logo ${index + 1}`}
-                            className={`${logoImageSizeClasses} object-contain ${logo.src.endsWith('chatgptWHT.png') || logo.src.endsWith('anthropicwhiteSymbol.png') || logo.src.endsWith('github.png') ? '' : 'filter invert dark:invert-0'}`}
+                            className={`${logoImageSizeClasses} object-contain ${logo.src.endsWith('chatgptWHT.png') || logo.src.endsWith('anthropicwhiteSymbol.png') || logo.src.endsWith('github.png') || logo.src.endsWith('Slack_icon_2019.svg.png') || logo.src.endsWith('cursor light mode(1).png') || logo.src.endsWith('cursor.png') ? '' : 'filter invert dark:invert-0'}`}
                           />
                         </a>
                       ) : (
                         <img
                           src={logo.src}
                           alt={logo.alt || `Logo ${index + 1}`}
-                          className={`${logoImageSizeClasses} object-contain ${logo.src.endsWith('chatgptWHT.png') || logo.src.endsWith('anthropicwhiteSymbol.png') || logo.src.endsWith('github.png') ? '' : 'filter invert dark:invert-0'}`}
+                          className={`${logoImageSizeClasses} object-contain ${logo.src.endsWith('chatgptWHT.png') || logo.src.endsWith('anthropicwhiteSymbol.png') || logo.src.endsWith('github.png') || logo.src.endsWith('Slack_icon_2019.svg.png') || logo.src.endsWith('cursor light mode(1).png') || logo.src.endsWith('cursor.png') ? '' : 'filter invert dark:invert-0'}`}
                         />
                       )}
                     </div>

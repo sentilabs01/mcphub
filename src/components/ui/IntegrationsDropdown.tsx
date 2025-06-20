@@ -6,8 +6,9 @@ interface IntegrationsDropdownProps {
   darkMode?: boolean;
 }
 
-const HIDDEN_PROVIDER_IDS = new Set(["slack", "chroma", "jupyter"]);
-const ACTIVE_PROVIDERS = PROVIDERS.filter(p => !HIDDEN_PROVIDER_IDS.has(p.id));
+const HIDDEN_PROVIDER_IDS = new Set(["chroma", "jupyter", "figma", "bolt", "21st_dev"]);
+const ACTIVE_PROVIDERS = PROVIDERS.filter(p => !HIDDEN_PROVIDER_IDS.has(p.id))
+  .sort((a, b) => a.name.localeCompare(b.name));
 
 export const IntegrationsDropdown: React.FC<IntegrationsDropdownProps> = ({ darkMode }) => {
   const [selectedId, setSelectedId] = useState('');
