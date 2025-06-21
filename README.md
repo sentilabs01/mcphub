@@ -274,3 +274,34 @@ The UI supports slash‐commands for Zapier via the MCP gateway.
 3. Settings → Anthropic → "Test Key" should return **200 OK** with green status.
 
 ---
+
+## 🚀 August 2025 – Notion Integration (alpha)
+
+* **First-class Notion provider** – ChatBar now understands `/notion` commands and routes them through the MCP Gateway.
+* **Supported slugs**  
+  `pages` (list), `page <id>` (retrieve), `create-page <parentId> "Title"`, `update-page <id> "title=New"`.
+* **Backend proxy** – Front-end posts to `POST /proxy/notion` on the MCP Server; the server attaches `Authorization: Bearer <token>` & `Notion-Version: 2022-06-28` and streams the original Notion response back.  Zero CORS issues.
+* **Scopes & access** – Your internal-integration token must have `content:read` for read commands and `content:write` for create/update.  Invite the integration to the pages/databases you want it to see.
+
+### Smoke-test
+
+```bash
+# list pages
+curl -X POST http://localhost:3002/proxy/notion \
+     -H "Content-Type: application/json" \
+     -d '{"path":"search","method":"POST","apiKey":"$NOTION_TOKEN","body":{"query":"","page_size":10}}' | jq .
+
+# retrieve a page by id
+curl -X POST http://localhost:3002/proxy/notion \
+     -H "Content-Type: application/json" \
+     -d '{"path":"pages/21965be378b4804cb85cd16e7f7505d7","apiKey":"$NOTION_TOKEN"}' | jq .
+```
+
+Add the integration token in **Integrations → Notion Portal** and you can now run:
+
+```
++/notion pages
++/notion page 21965be378b4804cb85cd16e7f7505d7
+```
+
+---

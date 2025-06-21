@@ -25,7 +25,7 @@ import { prettyPrintResult } from '../../utils/prettyPrint';
 import { getCredential } from '../../services/credentialsService';
 import { listZapierZaps, listZapierActions } from '../../services/zapierNLAService';
 import { splitMcpEndpoint } from '../../utils/zapier';
-import { safeGet } from '../../utils/safeLocal';
+import { safeGet, safeSet } from '../../utils/safeLocal';
 import { fetchStoredSlackToken } from '../../services/slackService';
 import { useToken } from '../../hooks/useToken';
 
@@ -263,7 +263,12 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
             localStorage.setItem(`${acc.provider}_token`, tok);
             // Special mapping for Make.com so chat handler picks it up
             if (acc.provider === 'make_com') {
-              localStorage.setItem('makeToken', tok);
+              if (creds.active) localStorage.setItem('makeActive', creds.active);
+              if (creds.type === 'api' || creds.apiToken) {
+                localStorage.setItem('makeApiToken', tok);
+              } else {
+                localStorage.setItem('makeMcpToken', tok);
+              }
               if (creds.zone) localStorage.setItem('makeZone', creds.zone);
             }
           }
@@ -438,6 +443,9 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     // Dispatch start event for observability
     window.dispatchEvent(new CustomEvent('mcp:command-start', { detail: { input: processedInput } }));
 
+    // Track whether we already fired the end event for this command
+    let ended = false;
+
     try {
       // --- GitHub Chat Commands ---
       const githubIntent = parseGithubIntent(processedInput);
@@ -498,6 +506,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         }
         setLoading(false);
         window.dispatchEvent(new CustomEvent('mcp:command-end', { detail: { input: processedInput } }));
+        ended = true;
         return;
       }
       // --- End GitHub Chat Commands ---
@@ -554,9 +563,90 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 
         setLoading(false);
         window.dispatchEvent(new CustomEvent('mcp:command-end', { detail: { input: processedInput } }));
+        ended = true;
         return;
       }
       // --- End Slack Chat Commands ---
+
+      // --- Notion Chat Commands ---
+      if (processedInput.startsWith('/notion')) {
+        const rawNotion = processedInput.replace(/^\/notion\s*/i, '').trim();
+        if (!rawNotion) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Usage: /notion <command>. Example: /notion pages' }]);
+          setLoading(false);
+          window.dispatchEvent(new CustomEvent('mcp:command-end', { detail: { input: processedInput } }));
+          ended = true;
+          return;
+        }
+
+        // Parse first token as command, rest as arguments
+        const rawParts = rawNotion.trim().split(/\s+/);
+        const cmdToken = rawParts[0].toLowerCase();
+        let notionCmd = cmdToken;
+        let cmdParams: Record<string, any> = {};
+
+        if (cmdToken === 'page' && rawParts[1]) {
+          cmdParams.pageId = rawParts[1];
+        } else if (cmdToken === 'create-page' && rawParts[1]) {
+          cmdParams.parentId = rawParts[1];
+          // look for quoted title in original string
+          const titleMatch = rawNotion.match(/"([^"]+)"/);
+          if (titleMatch) cmdParams.title = titleMatch[1];
+        } else if (cmdToken === 'update-page' && rawParts[1]) {
+          cmdParams.pageId = rawParts[1];
+          const kvMatch = rawNotion.match(/\s+([a-zA-Z0-9_]+)=\"?([^\"]+)\"?/);
+          if (kvMatch) {
+            const [, key, val] = kvMatch;
+            cmdParams[key] = val;
+          }
+        } else if (cmdToken === 'list' && rawParts[1] === 'pages') {
+          notionCmd = 'pages';
+        } else if (cmdToken === 'pages') {
+          // already good
+        } else {
+          // fallback to dashed slug like before
+          notionCmd = rawNotion.toLowerCase().replace(/\s+/g, '-');
+        }
+
+        // Retrieve token (local first, then Supabase credential)
+        let notionToken: string = localStorage.getItem('notion_token') || '';
+        if (!notionToken && user) {
+          const rec = await getCredential(user.id, 'notion');
+          notionToken = rec?.credentials?.token || '';
+          if (notionToken) safeSet('notion_token', notionToken);
+        }
+
+        if (!notionToken) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Please save a Notion integration token in the Notion portal first.' }]);
+          setLoading(false);
+          window.dispatchEvent(new CustomEvent('mcp:command-end', { detail: { input: processedInput } }));
+          ended = true;
+          return;
+        }
+
+        // Route via MCP server
+        const server = await MCPServerService.getServerById('notion');
+        if (!server || !server.apiUrl) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Notion MCP server not found.' }]);
+          setLoading(false);
+          window.dispatchEvent(new CustomEvent('mcp:command-end', { detail: { input: processedInput } }));
+          ended = true;
+          return;
+        }
+
+        try {
+          const result = await runMCPCommand(server.apiUrl, notionToken, notionCmd, cmdParams, 'notion');
+          setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('notion', result) }]);
+        } catch (err: any) {
+          setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Notion command.' }]);
+        }
+
+        setLoading(false);
+        window.dispatchEvent(new CustomEvent('mcp:command-end', { detail: { input: processedInput } }));
+        ended = true;
+        return;
+      }
+      // --- End Notion Chat Commands ---
 
       // --- Google Drive Chat Commands ---
       if (processedInput.startsWith('/drive') || processedInput.startsWith('/google_drive')) {
@@ -889,8 +979,11 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         const cleanCmdRaw = processedInput.replace(/^\/(make_com|make)\s*/i, '').trim();
         const cleanCmd = cleanCmdRaw.toLowerCase().replace(/\s+/g, '-');
         let makeZone   = localStorage.getItem('makeZone')   || '';
-        let makeToken = localStorage.getItem('makeToken') || '';
-        const makeTokenType = localStorage.getItem('makeTokenType') || 'mcp';
+        const makeActive = localStorage.getItem('makeActive') || 'mcp';
+        let makeToken = makeActive === 'api' ?
+          localStorage.getItem('makeApiToken') || '' :
+          localStorage.getItem('makeMcpToken') || '';
+        const makeTokenType = makeActive;
         if ((!makeZone || !makeToken) && user) {
           try {
             const rec: any = await getCredential(user.id, 'make_com');
@@ -899,8 +992,11 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
                 makeZone = rec.credentials.zone || '';
                 localStorage.setItem('makeZone', makeZone);
               }
-              if (!makeToken) localStorage.setItem('makeToken', rec.credentials.token || '');
-              makeToken = rec.credentials.token || '';
+              if (!makeToken) {
+                if (makeTokenType === 'api') localStorage.setItem('makeApiToken', rec.credentials.apiToken || rec.credentials.token || '');
+                else localStorage.setItem('makeMcpToken', rec.credentials.mcpToken || rec.credentials.token || '');
+              }
+              makeToken = makeTokenType === 'api' ? (rec.credentials.apiToken || '') : (rec.credentials.mcpToken || rec.credentials.token || '');
             }
           } catch {}
         }
@@ -911,17 +1007,19 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         }
 
         // ----- Command patterns -----
-        // 1. List scenarios
-        if (cleanCmd === 'list-scenarios' || cleanCmd === 'list') {
+        let cmdAlias = cleanCmdRaw.trim().toLowerCase();
+        if (cmdAlias.startsWith('make_')) cmdAlias = cmdAlias.slice(5);
+        const listRegex = /^(list|get)([-_\s]?scenarios)?$/;
+        if (listRegex.test(cmdAlias) || cleanCmd === 'list-scenarios' || cleanCmd === 'list') {
+          const providerKey = makeTokenType === 'api' ? 'make_api_list' : 'make_mcp_list';
+          const bodyObj: any = makeTokenType === 'api'
+            ? { provider: 'make_api_list', zone: makeZone, token: makeToken }
+            : { provider: 'make_mcp_list', zone: makeZone, token: makeToken };
           try {
             const res = await fetch('http://localhost:3002/api/command', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                provider: 'make_mcp_list',
-                zone: makeZone,
-                token: makeToken,
-              }),
+              body: JSON.stringify(bodyObj),
             });
             if (res.ok) {
               const json = await res.json();
@@ -978,6 +1076,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   provider: 'make_api_run',
+                  zone: makeZone,
                   token: makeToken,
                   scenarioId,
                 }),
@@ -1083,6 +1182,9 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       setError(err.message || 'Failed to send message');
       window.dispatchEvent(new CustomEvent('mcp:command-error', { detail: { input: processedInput, error: err?.message || String(err) } }));
     } finally {
+      if (!ended) {
+        window.dispatchEvent(new CustomEvent('mcp:command-end', { detail: { input: processedInput } }));
+      }
       setLoading(false);
       inFlightRef.current = false; // release lock
     }
