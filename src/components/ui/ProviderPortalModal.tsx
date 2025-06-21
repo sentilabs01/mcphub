@@ -12,8 +12,13 @@ import { GoogleLogin, useGoogleLogin } from '@react-oauth/google';
 import { verifyGithubToken } from '../../services/githubService';
 import { getCredential, saveCredential, deleteCredential } from '../../services/credentialsService';
 import { validateZapierApiKey } from '../../services/zapierService';
+import { splitMcpEndpoint } from '../../utils/zapier';
 import { validateOpenAIApiKey } from '../../services/openaiService';
+import { validateN8nCredentials } from '../../services/n8nService';
+import { validateMakeCredentials } from '../../services/makeService';
+import { validateSlackToken, fetchStoredSlackToken, saveSlackTokenToBackend, deleteStoredSlackToken } from '../../services/slackService';
 import { prettyPrintResult } from '../../utils/prettyPrint';
+import { safeSet, safeRemove } from '../../utils/safeLocal';
 
 interface ProviderPortalModalProps {
   isOpen: boolean;
@@ -26,7 +31,7 @@ interface ProviderPortalModalProps {
 export const buildGoogleConsentUrl = (scopes: string[], state: string) => {
   const cid = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   const supaUrl = import.meta.env.VITE_SUPABASE_URL;
-  const redirect = import.meta.env.VITE_GOOGLE_REDIRECT_URI || `${import.meta.env.VITE_SUPABASE_URL}/auth/v1/callback`;
+  const redirect = import.meta.env.VITE_GOOGLE_REDIRECT_URI || `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/google-oauth-complete`;
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   url.searchParams.set('client_id', cid);
   url.searchParams.set('redirect_uri', redirect);
@@ -53,12 +58,13 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
   const [commandResult, setCommandResult] = useState<string | null>(null);
   const [commandRunning, setCommandRunning] = useState(false);
   const [commandError, setCommandError] = useState<string | null>(null);
-  // State for OpenAI API key input
-  const [openAIApiKey, setOpenAIApiKey] = useState('');
-  const [openAIApiKeySaved, setOpenAIApiKeySaved] = useState(false);
+  // State for OpenAI API key
+  const { user, session } = useAuth();
+  const [openAIApiKey, setOpenAIApiKey] = React.useState('');
+  const [openAIApiKeySaved, setOpenAIApiKeySaved] = React.useState(false);
   // New: Feedback state for OpenAI key actions
-  const [openAIFeedback, setOpenAIFeedback] = useState<string | null>(null);
-  const [openAITesting, setOpenAITesting] = useState(false);
+  const [openAIFeedback, setOpenAIFeedback] = React.useState<string | null>(null);
+  const [openAITesting, setOpenAITesting] = React.useState(false);
   // State for Google Drive and Gmail
   const [driveConnected, setDriveConnected] = useState(false);
   const [driveEmail, setDriveEmail] = useState('');
@@ -75,7 +81,9 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
   const [anthropicTesting, setAnthropicTesting] = useState(false);
   const [geminiFeedback, setGeminiFeedback] = useState<string | null>(null);
   const [geminiTesting, setGeminiTesting] = useState(false);
-  const { user, session } = useAuth();
+  // Slack feedback/testing
+  const [slackFeedback, setSlackFeedback] = useState<string | null>(null);
+  const [slackTesting, setSlackTesting] = useState(false);
 
   // Remove local drive/gmail state, use Supabase session
   const googleAccessToken = session?.provider_token || '';
@@ -159,7 +167,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
     const authenticated = !!user;
     if (provider?.id === 'google_drive' || provider?.id === 'google_calendar') {
       if (authenticated) {
-        const token = localStorage.getItem('googleToken');
+        const token = localStorage.getItem('google_drive_token') || '';
         setDriveConnected(!!token);
       } else {
         setDriveConnected(false);
@@ -168,7 +176,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
     }
     if (provider?.id === 'gmail') {
       if (authenticated) {
-        const token = localStorage.getItem('gmailToken');
+        const token = localStorage.getItem('gmail_token') || '';
         setGmailConnected(!!token);
       } else {
         setGmailConnected(false);
@@ -200,7 +208,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
   };
 
   const handleSaveOpenAIApiKey = () => {
-    localStorage.setItem('openai_token', openAIApiKey);
+    safeSet('openai_token', openAIApiKey);
     setOpenAIApiKeySaved(true);
     setOpenAIFeedback('API key saved successfully!');
     // Reload from localStorage to ensure sync
@@ -210,7 +218,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
   };
 
   const handleRemoveOpenAIApiKey = () => {
-    localStorage.removeItem('openai_token');
+    safeRemove('openai_token');
     setOpenAIApiKey('');
     setOpenAIApiKeySaved(false);
     setOpenAIFeedback('API key removed.');
@@ -241,7 +249,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
   };
 
   const handleGmailLoginSuccess = (cred: any) => {
-    localStorage.setItem('gmailToken', cred.credential);
+    safeSet('gmail_token', cred.credential);
     try {
       const decoded: any = jwtDecode(cred.credential);
       setGmailEmail(decoded.email || '');
@@ -251,7 +259,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
     setGmailConnected(true);
   };
   const handleDisconnectGmail = () => {
-    localStorage.removeItem('gmailToken');
+    safeRemove('gmail_token');
     setGmailConnected(false);
     setGmailEmail('');
   };
@@ -363,10 +371,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
               <GeminiKeyManager darkMode={darkMode} feedback={geminiFeedback} setFeedback={setGeminiFeedback} testing={geminiTesting} setTesting={setGeminiTesting} />
             ) : (provider.id === 'google_drive' || provider.id === 'google_calendar') ? (
               googleAccessToken ? (
-                <>
-                  <span className="text-xs text-green-500">Connected as {userEmail || 'Google user'} via Supabase login</span>
-                  <div className="mt-2"><DriveOAuthManager darkMode={darkMode} /></div>
-                </>
+                <span className="text-xs text-green-500">Connected as {userEmail || 'Google user'} via Supabase login</span>
               ) : (
                 <DriveOAuthManager darkMode={darkMode} />
               )
@@ -382,6 +387,8 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
               <N8nKeyManager darkMode={darkMode} />
             ) : provider.id === 'make_com' ? (
               <MakeKeyManager darkMode={darkMode} />
+            ) : provider.id === 'slack' ? (
+              <SlackKeyManager darkMode={darkMode} feedback={slackFeedback} setFeedback={setSlackFeedback} testing={slackTesting} setTesting={setSlackTesting} />
             ) : (
               <div className={`text-xs ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Account management UI coming soon.</div>
             )}
@@ -407,6 +414,8 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
               <div className={`text-xs mt-1 ${geminiFeedback ? (geminiFeedback.includes('valid') ? 'text-green-600' : 'text-red-500') : (darkMode ? 'text-zinc-400' : 'text-gray-400')}`}>{geminiFeedback || 'No recent status.'}</div>
             ) : provider.id === 'github' ? (
               <div className={`text-xs mt-1 ${githubFeedback ? (githubFeedback.includes('valid') ? 'text-green-600' : 'text-red-500') : (darkMode ? 'text-zinc-400' : 'text-gray-400')}`}>{githubFeedback || 'No recent status.'}</div>
+            ) : provider.id === 'slack' ? (
+              <div className={`text-xs mt-1 ${slackFeedback ? (slackFeedback.includes('valid') || slackFeedback.includes('✅') ? 'text-green-600' : 'text-red-500') : (darkMode ? 'text-zinc-400' : 'text-gray-400')}`}>{slackFeedback || 'No recent status.'}</div>
             ) : provider.id === 'n8n' ? (
               <div className={`text-xs mt-1 ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Credentials stored locally.</div>
             ) : provider.id === 'make_com' ? (
@@ -424,25 +433,42 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
 };
 
 const AnthropicKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, setFeedback: (msg: string | null) => void, testing: boolean, setTesting: (b: boolean) => void }> = ({ darkMode, feedback, setFeedback, testing, setTesting }) => {
+  const { user } = useAuth();
   const [anthropicKey, setAnthropicKey] = React.useState('');
   const [anthropicKeySaved, setAnthropicKeySaved] = React.useState(false);
 
   React.useEffect(() => {
-    const stored = localStorage.getItem('anthropic_token') || '';
-    setAnthropicKey(stored);
-    setAnthropicKeySaved(!!stored);
-  }, []);
+    (async () => {
+      if (user) {
+        const rec = await getCredential(user.id, 'anthropic');
+        const key = rec?.credentials?.api_key || rec?.credentials?.token || '';
+        if (key) safeSet('anthropic_token', key);
+        setAnthropicKey(key);
+        setAnthropicKeySaved(!!key);
+      } else {
+        const stored = localStorage.getItem('anthropic_token') || '';
+        setAnthropicKey(stored);
+        setAnthropicKeySaved(!!stored);
+      }
+    })();
+  }, [user]);
 
-  const handleSave = () => {
-    localStorage.setItem('anthropic_token', anthropicKey);
+  const handleSave = async () => {
+    safeSet('anthropic_token', anthropicKey);
+    if (user) {
+      await saveCredential(user.id, 'anthropic', { api_key: anthropicKey });
+    }
     setAnthropicKeySaved(true);
     setFeedback('API key saved successfully!');
     setAnthropicKey(localStorage.getItem('anthropic_token') || '');
     setTimeout(() => setFeedback(null), 2000);
   };
 
-  const handleRemove = () => {
-    localStorage.removeItem('anthropic_token');
+  const handleRemove = async () => {
+    safeRemove('anthropic_token');
+    if (user) {
+      await deleteCredential(user.id, 'anthropic');
+    }
     setAnthropicKey('');
     setAnthropicKeySaved(false);
     setFeedback('API key removed.');
@@ -507,25 +533,42 @@ const AnthropicKeyManager: React.FC<{ darkMode?: boolean, feedback: string | nul
 };
 
 const GeminiKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, setFeedback: (msg: string | null) => void, testing: boolean, setTesting: (b: boolean) => void }> = ({ darkMode, feedback, setFeedback, testing, setTesting }) => {
+  const { user } = useAuth();
   const [geminiKey, setGeminiKey] = React.useState('');
   const [geminiKeySaved, setGeminiKeySaved] = React.useState(false);
 
   React.useEffect(() => {
-    const stored = localStorage.getItem('google_token') || '';
-    setGeminiKey(stored);
-    setGeminiKeySaved(!!stored);
-  }, []);
+    (async () => {
+      if (user) {
+        const rec = await getCredential(user.id, 'google');
+        const key = rec?.credentials?.api_key || rec?.credentials?.token || '';
+        if (key) safeSet('google_token', key);
+        setGeminiKey(key);
+        setGeminiKeySaved(!!key);
+      } else {
+        const stored = localStorage.getItem('google_token') || '';
+        setGeminiKey(stored);
+        setGeminiKeySaved(!!stored);
+      }
+    })();
+  }, [user]);
 
-  const handleSave = () => {
-    localStorage.setItem('google_token', geminiKey);
+  const handleSave = async () => {
+    safeSet('google_token', geminiKey);
+    if (user) {
+      await saveCredential(user.id, 'google', { api_key: geminiKey });
+    }
     setGeminiKeySaved(true);
     setFeedback('API key saved successfully!');
     setGeminiKey(localStorage.getItem('google_token') || '');
     setTimeout(() => setFeedback(null), 2000);
   };
 
-  const handleRemove = () => {
-    localStorage.removeItem('google_token');
+  const handleRemove = async () => {
+    safeRemove('google_token');
+    if (user) {
+      await deleteCredential(user.id, 'google');
+    }
     setGeminiKey('');
     setGeminiKeySaved(false);
     setFeedback('API key removed.');
@@ -595,37 +638,53 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const { user } = useAuth();
 
   React.useEffect(() => {
-    const token = localStorage.getItem('googleToken') || '';
-    setDriveToken(token);
-    if (token) {
-      if (token.includes('.')) {
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          setDriveEmail(payload.email || '');
-        } catch {
-          // fallthrough to fetch profile
+    (async () => {
+      // 1. Local storage token (legacy / implicit flow)
+      const localTok = localStorage.getItem('google_drive_token') || '';
+      if (localTok) {
+        setDriveToken(localTok);
+        if (localTok.includes('.')) {
+          try {
+            const payload = JSON.parse(atob(localTok.split('.')[1]));
+            setDriveEmail(payload.email || '');
+          } catch {/* ignore */}
         }
+        if (!driveEmail) {
+          fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${localTok}` },
+          })
+            .then(r => (r.ok ? r.json() : null))
+            .then(u => setDriveEmail(u?.email || ''))
+            .catch(() => setDriveEmail(''));
+        }
+        return;
       }
-      if (!driveEmail) {
-        // attempt to fetch profile with access token
-        fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-          .then(r => r.ok ? r.json() : null)
-          .then(u => setDriveEmail(u?.email || ''))
-          .catch(() => setDriveEmail(''));
+
+      // 2. Supabase credential via Edge Function
+      if (user?.id) {
+        try {
+          const rec = await getCredential(user.id, 'google_drive');
+          const tok = rec?.credentials?.token || rec?.credentials?.access_token || rec?.credentials?.accessToken || '';
+          if (tok) {
+            setDriveToken(tok);
+            fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${tok}` },
+            })
+              .then(r => (r.ok ? r.json() : null))
+              .then(u => setDriveEmail(u?.email || ''))
+              .catch(() => setDriveEmail(''));
+          }
+        } catch {/* ignore */}
       }
-    } else {
-      setDriveEmail('');
-    }
-  }, []);
+    })();
+  }, [user]);
 
   const driveLogin = useGoogleLogin({
     scope: 'https://www.googleapis.com/auth/drive',
     flow: 'implicit',
     onSuccess: (tokenResponse) => {
       if (tokenResponse.access_token) {
-        localStorage.setItem('googleToken', tokenResponse.access_token);
+        safeSet('google_drive_token', tokenResponse.access_token);
         setDriveToken(tokenResponse.access_token);
         // Optional: fetch userinfo for email
         fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -640,18 +699,21 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   });
 
   const handleDisconnect = () => {
-    localStorage.removeItem('googleToken');
+    safeRemove('google_drive_token');
     setDriveToken('');
     setDriveEmail('');
   };
 
+  // Connect via OAuth code flow with read-write scopes
   const handleConnect = () => {
     const scopes = [
       'https://www.googleapis.com/auth/drive',
       'https://www.googleapis.com/auth/gmail.modify',
-      'https://www.googleapis.com/auth/calendar'
+      'https://www.googleapis.com/auth/calendar',
+      'https://www.googleapis.com/auth/calendar.events'
     ];
-    window.location.href = buildGoogleConsentUrl(scopes, user?.id || 'anon');
+    const consentUrl = buildGoogleConsentUrl(scopes, user?.id || 'anon');
+    window.location.href = consentUrl;
   };
 
   return (
@@ -676,22 +738,44 @@ const GmailOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const { user: userAuth } = useAuth();
 
   React.useEffect(() => {
-    const token = localStorage.getItem('gmailToken') || '';
-    setGmailToken(token);
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        setGmailEmail(payload.email || '');
-      } catch {
-        setGmailEmail('');
+    (async () => {
+      // 1. Prefer any token saved locally (legacy flow or implicit login)
+      const localTok = localStorage.getItem('gmail_token') || '';
+      if (localTok) {
+        setGmailToken(localTok);
+        try {
+          const payload = JSON.parse(atob(localTok.split('.')[1]));
+          setGmailEmail(payload.email || '');
+        } catch {
+          // ignore – will try fetch profile below if needed
+        }
+        return;
       }
-    } else {
-      setGmailEmail('');
-    }
-  }, []);
+
+      // 2. Otherwise, check Supabase credentials inserted by the Edge Function
+      if (userAuth?.id) {
+        try {
+          const rec = await getCredential(userAuth.id, 'gmail');
+          const tok = rec?.credentials?.token || rec?.credentials?.access_token || rec?.credentials?.accessToken || '';
+          if (tok) {
+            setGmailToken(tok);
+            // Fetch basic profile to show email for confirmation (best-effort)
+            fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${tok}` },
+            })
+              .then(r => (r.ok ? r.json() : null))
+              .then(u => setGmailEmail(u?.email || ''))
+              .catch(() => setGmailEmail(''));
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    })();
+  }, [userAuth]);
 
   const handleLoginSuccess = (cred: any) => {
-    localStorage.setItem('gmailToken', cred.credential);
+    safeSet('gmail_token', cred.credential);
     try {
       const payload = JSON.parse(atob(cred.credential.split('.')[1]));
       setGmailEmail(payload.email || '');
@@ -701,19 +785,27 @@ const GmailOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     setGmailToken(cred.credential);
   };
 
-  const handleDisconnect = () => {
-    localStorage.removeItem('gmailToken');
+  const handleDisconnect = async () => {
+    safeRemove('gmail_token');
+    if (userAuth?.id) {
+      try {
+        await deleteCredential(userAuth.id, 'gmail');
+      } catch {/* ignore */}
+    }
     setGmailToken('');
     setGmailEmail('');
   };
 
+  // Connect Gmail via OAuth code flow with read-write scopes
   const connectGmail = () => {
     const scopes = [
       'https://www.googleapis.com/auth/gmail.modify',
       'https://www.googleapis.com/auth/drive',
-      'https://www.googleapis.com/auth/calendar'
+      'https://www.googleapis.com/auth/calendar',
+      'https://www.googleapis.com/auth/calendar.events'
     ];
-    window.location.href = buildGoogleConsentUrl(scopes, userAuth?.id || 'anon');
+    const consentUrl = buildGoogleConsentUrl(scopes, userAuth?.id || 'anon');
+    window.location.href = consentUrl;
   };
 
   return (
@@ -746,7 +838,7 @@ const GithubKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, 
       const legacy = localStorage.getItem('github_token');
       if (legacy) {
         await saveCredential(user.id, 'github', { token: legacy });
-        localStorage.removeItem('github_token');
+        safeRemove('github_token');
       }
 
       const rec = await getCredential(user.id, 'github');
@@ -833,28 +925,45 @@ const ZapierKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const [baseUrl, setBaseUrl] = React.useState('');
   const [privKey, setPrivKey] = React.useState('');
   const [privSaved, setPrivSaved] = React.useState(false);
+  const [endpoint, setEndpoint] = React.useState('');
   const { user } = useAuth();
 
   React.useEffect(() => {
     if (!user) return;
     getCredential(user.id, 'zapier').then(rec => {
       if (rec) {
-        setApiKey(rec.credentials.apiKey || '');
+        setApiKey(rec.credentials.api_key || '');
         setApiKeySaved(true);
       }
     });
     getCredential(user.id, 'zapier_cli').then(rec => {
       if (rec) {
         setBaseUrl(rec.credentials.baseUrl || '');
-        setPrivKey(rec.credentials.apiKey || '');
+        setPrivKey(rec.credentials.api_key || '');
+        setEndpoint(rec.credentials.endpoint || '');
         setPrivSaved(true);
       }
     });
   }, [user]);
 
+  const saveEndpoint = async () => {
+    if (!user || !endpoint.trim()) return;
+    const parsed = splitMcpEndpoint(endpoint.trim());
+    if (!parsed) {
+      setFeedback('Invalid MCP endpoint URL');
+      return;
+    }
+    await saveCredential(user.id, 'zapier_cli', { endpoint: endpoint.trim() });
+    safeSet('zapier_mcp_endpoint', endpoint.trim());
+    safeSet('zapier_mcp_url', parsed.base);
+    safeSet('zapier_mcp_token', parsed.token);
+    setPrivSaved(true);
+    setFeedback('Endpoint saved!');
+  };
+
   const saveApiKey = async () => {
     if (!user) return;
-    await saveCredential(user.id, 'zapier', { apiKey });
+    await saveCredential(user.id, 'zapier', { api_key: apiKey });
     setApiKeySaved(true);
     setFeedback('Key saved!');
   };
@@ -869,7 +978,7 @@ const ZapierKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 
   const savePriv = async () => {
     if (!user) return;
-    await saveCredential(user.id, 'zapier_cli', { baseUrl, apiKey: privKey });
+    await saveCredential(user.id, 'zapier_cli', { baseUrl, api_key: privKey });
     setPrivSaved(true);
     setFeedback('Private app creds saved!');
   };
@@ -887,8 +996,15 @@ const ZapierKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const testApiKey = async () => {
     setTesting(true);
     setFeedback(null);
+    const token = apiKey.trim();
+    if (!token) { setFeedback('Enter a key first'); setTesting(false); return; }
+    if (!token.startsWith('zapier_nla_') && !token.startsWith('zapier_')) {
+      setFeedback('Not a valid Zapier API key');
+      setTesting(false);
+      return;
+    }
     try {
-      const ok = await validateZapierApiKey(apiKey);
+      const ok = await validateZapierApiKey(token);
       setFeedback(ok ? 'API key is valid ✅' : 'API key appears invalid');
     } catch (err: any) {
       setFeedback(err.message || 'Test failed');
@@ -899,6 +1015,21 @@ const ZapierKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 
   return (
     <div className="flex flex-col space-y-4">
+      {/* Combined MCP Endpoint */}
+      <div className="flex flex-col space-y-2">
+        <label className="text-xs font-medium">Zapier MCP Endpoint (single URL)</label>
+        <input
+          type="text"
+          value={endpoint}
+          onChange={e => { setEndpoint(e.target.value); setFeedback(null); setPrivSaved(false); }}
+          placeholder="https://actions.zapier.com/mcp/sk-.../sse"
+          className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+        />
+        <div className="flex items-center space-x-2">
+          <Button size="sm" onClick={saveEndpoint} disabled={!endpoint}>Save</Button>
+        </div>
+        <span className="text-xs text-gray-500">If you prefer the combined URL, paste it here and we will parse it for you.</span>
+      </div>
       {/* AI Actions Key */}
       <div className="flex flex-col space-y-2">
         <label className="text-xs font-medium">Zapier AI Actions API Key</label>
@@ -950,17 +1081,18 @@ const ZapierKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 };
 
 const N8nKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
-  const [baseUrl, setBaseUrl] = React.useState('');
   const [apiKey, setApiKey] = React.useState('');
   const [saved, setSaved] = React.useState(false);
+  const [testing, setTesting] = React.useState(false);
+  const [feedback, setFeedback] = React.useState<string | null>(null);
+  const [baseUrl, setBaseUrl] = React.useState('');
   const { user } = useAuth();
 
   React.useEffect(() => {
     if (!user) return;
     getCredential(user.id, 'n8n').then(rec => {
       if (rec) {
-        setBaseUrl(rec.credentials.baseUrl || '');
-        setApiKey(rec.credentials.apiKey || '');
+        setApiKey(rec.credentials.api_key || '');
         setSaved(true);
       }
     });
@@ -968,15 +1100,28 @@ const N8nKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 
   const save = async () => {
     if (!user) return;
-    await saveCredential(user.id, 'n8n', { baseUrl, apiKey });
+    await saveCredential(user.id, 'n8n', { baseUrl, api_key: apiKey });
     setSaved(true);
   };
   const remove = async () => {
     if (!user) return;
     await deleteCredential(user.id, 'n8n');
-    setBaseUrl('');
     setApiKey('');
     setSaved(false);
+    setBaseUrl('');
+  };
+
+  const test = async () => {
+    setTesting(true);
+    setFeedback(null);
+    try {
+      const ok = await validateN8nCredentials(baseUrl, apiKey);
+      setFeedback(ok ? 'Connection successful ✅' : 'Connection failed');
+    } catch (err: any) {
+      setFeedback(err.message || 'Test failed');
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
@@ -986,7 +1131,7 @@ const N8nKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         type="text"
         value={baseUrl}
         onChange={e => { setBaseUrl(e.target.value); setSaved(false); }}
-        placeholder="https://api.my-mcp.com"
+        placeholder="https://api.my-n8n.com"
         className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
       />
       <label className="text-xs font-medium">API Key (optional)</label>
@@ -999,92 +1144,286 @@ const N8nKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       />
       <div className="flex items-center space-x-2">
         <Button size="sm" onClick={save} disabled={saved}>Save</Button>
-        {saved && <Button size="sm" variant="destructive" onClick={remove}>Remove</Button>}
+        {saved && (
+          <>
+            <Button size="sm" variant="secondary" onClick={test} disabled={testing}>{testing ? 'Testing…' : 'Test'}</Button>
+            <Button size="sm" variant="destructive" onClick={remove}>Remove</Button>
+          </>
+        )}
       </div>
+      {feedback && <div className={`text-xs mt-1 ${feedback.includes('successful') ? 'text-green-600' : 'text-red-500'}`}>{feedback}</div>}
       <span className="text-xs text-gray-500">Only stored in this browser. Used by n8n custom node.</span>
     </div>
   );
 };
 
 const MakeKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
-  const [baseUrl, setBaseUrl] = React.useState('');
-  const [apiKey, setApiKey] = React.useState('');
-  const [saved, setSaved] = React.useState(false);
+  const [zone,  setZone]  = React.useState('us2.make.com');      // <-- edit default if needed
+  const [token, setToken] = React.useState('');
+  const [tokenType, setTokenType] = React.useState<'mcp' | 'api'>('mcp');
+  const [saved,   setSaved]   = React.useState(false);
+  const [testing, setTesting] = React.useState(false);
+  const [feedback,setFeedback]= React.useState<string | null>(null);
   const { user } = useAuth();
 
+  // load from Supabase on open
   React.useEffect(() => {
-    if (!user) return;
-    getCredential(user.id, 'make_com').then(rec => {
-      if (rec) {
-        setBaseUrl(rec.credentials.baseUrl || '');
-        setApiKey(rec.credentials.apiKey || '');
+    if (user) {
+      getCredential(user.id, 'make_com').then(rec => {
+        if (rec) {
+          setZone(rec.credentials.zone   || 'us2.make.com');
+          setToken(rec.credentials.token || '');
+          setTokenType(rec.credentials.type || 'mcp');
+          setSaved(true);
+        }
+      });
+    } else {
+      const locTok = localStorage.getItem('makeToken') || '';
+      const locZone= localStorage.getItem('makeZone')  || 'us2.make.com';
+      const locType = localStorage.getItem('makeTokenType') as 'mcp'|'api'|null;
+      if (locTok) {
+        setToken(locTok);
+        setZone(locZone);
+        setTokenType(locType || 'mcp');
         setSaved(true);
       }
-    });
+    }
   }, [user]);
 
   const save = async () => {
     if (!user) return;
-    await saveCredential(user.id, 'make_com', { baseUrl, apiKey });
+    await saveCredential(user.id, 'make_com', { zone, token, type: tokenType });
+    safeSet('makeZone', zone);
+    safeSet('makeToken', token);
+    safeSet('makeTokenType', tokenType);
     setSaved(true);
   };
   const remove = async () => {
     if (!user) return;
     await deleteCredential(user.id, 'make_com');
-    setBaseUrl('');
-    setApiKey('');
+    safeRemove('makeZone');
+    safeRemove('makeToken');
+    safeRemove('makeTokenType');
+    setZone('us2.make.com');
+    setToken('');
     setSaved(false);
+  };
+
+  // call the proxy route we added in server.js
+  const test = async () => {
+    setTesting(true); setFeedback(null);
+    try {
+      const res = await fetch('http://localhost:3002/api/command',{
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({
+          provider : 'make_mcp_test',
+          zone     : zone,
+          token    : token,
+        })
+      });
+      setFeedback(res.ok ? 'Connection successful ✅' : 'Connection failed');
+    } catch (e:any) {
+      setFeedback(e.message ?? 'Network error');
+    } finally { setTesting(false); }
   };
 
   return (
     <div className="flex flex-col space-y-2">
-      <label className="text-xs font-medium">Base URL</label>
+      <label className="text-xs font-medium">Zone</label>
       <input
-        type="text"
-        value={baseUrl}
-        onChange={e => { setBaseUrl(e.target.value); setSaved(false); }}
-        placeholder="https://api.my-mcp.com"
-        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+        value={zone}
+        onChange={e=>{setZone(e.target.value.trim()); setSaved(false);}}
+        placeholder="us2.make.com"
+        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700' : ''}`}
       />
-      <label className="text-xs font-medium">API Key (optional)</label>
+      <label className="text-xs font-medium">Token Type</label>
+      <select value={tokenType} onChange={e=>{setTokenType(e.target.value as any); setSaved(false);}} className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700' : ''}`}>
+        <option value="mcp">MCP Token</option>
+        <option value="api">API Token</option>
+      </select>
+      <label className="text-xs font-medium">MCP Token</label>
       <input
-        type="password"
-        value={apiKey}
-        onChange={e => { setApiKey(e.target.value); setSaved(false); }}
-        placeholder="key..."
-        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+        value={token}
+        onChange={e=>{
+          const raw = e.target.value.trim();
+          // If user pastes full https://<zone>/mcp/api/v1/u/<token>/sse
+          if (/https?:\/\/.+\/mcp\/api\/v1\/u\//i.test(raw)) {
+            try {
+              const u = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+              const parts = u.pathname.split('/'); // ['', 'mcp','api','v1','u','<token>','sse']
+              const maybeToken = parts[5] || '';
+              if (maybeToken) {
+                setZone(u.host);
+                setToken(maybeToken);
+                setSaved(false);
+                return;
+              }
+            } catch {}
+          }
+          setToken(raw);
+          setSaved(false);
+        }}
+        placeholder="e9518fba-17f2-4098-…"
+        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700' : ''}`}
       />
       <div className="flex items-center space-x-2">
         <Button size="sm" onClick={save} disabled={saved}>Save</Button>
-        {saved && <Button size="sm" variant="destructive" onClick={remove}>Remove</Button>}
+        {saved && <>
+          <Button size="sm" variant="secondary" onClick={test} disabled={testing}>
+            {testing ? 'Testing…' : 'Test'}
+          </Button>
+          <Button size="sm" variant="destructive" onClick={remove}>Remove</Button>
+        </>}
       </div>
-      <span className="text-xs text-gray-500">Stored only in this browser. Used by Make.com custom app.</span>
+      {feedback && (
+        <div className={`text-xs mt-1 ${feedback.includes('successful') ? 'text-green-600' : 'text-red-500'}`}>
+          {feedback}
+        </div>
+      )}
+      <span className="text-xs text-gray-500">Token is stored in Supabase. MCP token uses local gateway; API token calls Make REST API directly.</span>
     </div>
   );
 };
 
-const OpenAIKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
+const SlackKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, setFeedback: (msg: string | null) => void, testing: boolean, setTesting: (b: boolean) => void }> = ({ darkMode, feedback, setFeedback, testing, setTesting }) => {
+  const { user } = useAuth();
+  const [slackToken, setSlackToken] = React.useState('');
+  const [slackSaved, setSlackSaved] = React.useState(false);
+  const [workspaces, setWorkspaces] = React.useState([]);
+
+  React.useEffect(() => {
+    (async () => {
+      if (user) {
+        const rec = await getCredential(user.id, 'slack');
+        const tok = rec?.credentials?.token || '';
+        if (tok) {
+          setSlackToken(tok);
+          setSlackSaved(true);
+        }
+      } else {
+        const stored = localStorage.getItem('slack_token') || '';
+        setSlackToken(stored);
+        setSlackSaved(!!stored);
+      }
+    })();
+  }, [user]);
+
+  const handleSave = async () => {
+    const token = slackToken.trim();
+    if (!token) { setFeedback('Enter a token first'); return; }
+    const ok = await saveSlackTokenToBackend(token);
+    if (!ok) { setFeedback('Failed to save token'); return; }
+    // Persist locally so ChatBar and other components can access it immediately
+    safeSet('slack_token', token);
+    setSlackSaved(true);
+    setFeedback('Token saved successfully!');
+  };
+
+  const handleRemove = async () => {
+    await deleteStoredSlackToken();
+    safeRemove('slack_token');
+    setSlackToken('');
+    setSlackSaved(false);
+    setFeedback('Token removed.');
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setFeedback(null);
+    const token = slackToken.trim();
+    if (!token) { setFeedback('Enter a token first'); setTesting(false); return; }
+    if (!token.startsWith('xoxb-') && !token.startsWith('xapp-1-')) {
+      setFeedback('Not a Slack bot/app token');
+      setTesting(false);
+      return;
+    }
+    try {
+      const ok = await validateSlackToken(token);
+      setFeedback(ok ? 'API key is valid ✅' : 'API key appears invalid');
+    } catch (err: any) {
+      setFeedback(err.message || 'Test failed');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col space-y-2">
+      <label className="text-xs font-medium">Slack Token <span className="text-red-500">*</span></label>
+      <input
+        type="password"
+        value={slackToken}
+        onChange={e => { setSlackToken(e.target.value); setSlackSaved(false); }}
+        placeholder="xapp-1-..."
+        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+        autoComplete="off"
+      />
+      <div className="flex items-center space-x-2">
+        <Button size="sm" onClick={handleSave} disabled={!slackToken || slackSaved}>Save</Button>
+        {slackSaved && (
+          <>
+            <Button size="sm" variant="secondary" onClick={handleTest} disabled={testing}>{testing ? 'Testing…' : 'Test'}</Button>
+            <Button size="sm" variant="destructive" onClick={handleRemove}>Remove</Button>
+          </>
+        )}
+      </div>
+      {feedback && <div className={`text-xs mt-1 ${feedback.includes('valid') ? 'text-green-600' : 'text-red-500'}`}>{feedback}</div>}
+      {workspaces.length > 0 && (
+        <div className="text-xs mt-2 space-y-1">
+          <div className="font-semibold mb-1">Connected Workspaces:</div>
+          {workspaces.map((ws: any) => (
+            <div key={ws.id} className="flex items-center space-x-1">
+              {ws.icon && <img src={ws.icon} alt={ws.name} className="w-4 h-4 rounded" />}
+              <span>{ws.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <span className="text-xs text-gray-500">Required for all Slack commands. Your key is stored locally and never shared.</span>
+    </div>
+  );
+};
+
+// --- OpenAI API Key Manager (now persisted via Supabase) ---
+const OpenAIKeyManager: React.FC<{ darkMode?: boolean, feedback?: string | null, setFeedback?: (msg: string | null) => void, testing?: boolean, setTesting?: (b: boolean) => void }> = ({ darkMode }) => {
+  const { user } = useAuth();
   const [openAIApiKey, setOpenAIApiKey] = React.useState('');
   const [openAIApiKeySaved, setOpenAIApiKeySaved] = React.useState(false);
   const [openAIFeedback, setOpenAIFeedback] = React.useState<string | null>(null);
   const [openAITesting, setOpenAITesting] = React.useState(false);
 
   React.useEffect(() => {
-    const stored = localStorage.getItem('openai_token') || '';
-    setOpenAIApiKey(stored);
-    setOpenAIApiKeySaved(!!stored);
-  }, []);
+    (async () => {
+      if (user) {
+        const rec = await getCredential(user.id, 'openai');
+        const key = rec?.credentials?.api_key || rec?.credentials?.token || '';
+        if (key) safeSet('openai_token', key);
+        setOpenAIApiKey(key);
+        setOpenAIApiKeySaved(!!key);
+      } else {
+        const stored = localStorage.getItem('openai_token') || '';
+        setOpenAIApiKey(stored);
+        setOpenAIApiKeySaved(!!stored);
+      }
+    })();
+  }, [user]);
 
-  const handleSave = () => {
-    localStorage.setItem('openai_token', openAIApiKey);
+  const handleSave = async () => {
+    safeSet('openai_token', openAIApiKey);
+    if (user) {
+      await saveCredential(user.id, 'openai', { api_key: openAIApiKey });
+    }
     setOpenAIApiKeySaved(true);
     setOpenAIFeedback('API key saved successfully!');
-    setOpenAIApiKey(localStorage.getItem('openai_token') || '');
     setTimeout(() => setOpenAIFeedback(null), 2000);
   };
 
-  const handleRemove = () => {
-    localStorage.removeItem('openai_token');
+  const handleRemove = async () => {
+    safeRemove('openai_token');
+    if (user) {
+      await deleteCredential(user.id, 'openai');
+    }
     setOpenAIApiKey('');
     setOpenAIApiKeySaved(false);
     setOpenAIFeedback('API key removed.');
@@ -1138,7 +1477,7 @@ const OpenAIKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       {openAIFeedback && (
         <div className={`text-xs mt-1 ${openAIFeedback.includes('valid') ? 'text-green-600' : 'text-red-500'}`}>{openAIFeedback}</div>
       )}
-      <span className="text-xs text-gray-500">Required for all OpenAI commands. Your key is stored locally and never shared.</span>
+      <span className="text-xs text-gray-500">Required for all OpenAI commands. Your key is stored privately and synced to your account.</span>
     </div>
   );
 }; 

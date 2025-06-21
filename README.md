@@ -1,5 +1,14 @@
 # Slash / MCP
 
+## 🚀 June 2025 Token-Persistence & Gateway Hardening
+
+* **Safe local storage wrappers** (`safeSet`, `safeGet`, `safeRemove`) replace every direct `localStorage.*` call so tokens persist even in Safari/iOS privacy mode.
+* **`useToken` hook** – single source-of-truth for provider credentials; reads Supabase first, falls back to local cache, and exposes `saveToken/removeToken` helpers.
+* **Standalone MCP Gateway on :3002** – front-end calls all `/api/command` on port 3002; `mcp_servers.apiurl` rows updated. Main Express app on :3001 is unaffected.
+* **Command Status Indicator** – blue spinner shows while any MCP command is in flight (`mcp:command-start/end` events).
+* **`x-mcp-command-id` header** – every `/api/command` POST now includes a UUID so the backend can stream per-command progress events.
+* **Pretty-print Slack** – Channel lists now render as numbered lines instead of raw JSON.
+
 ## 🚀 July 2025 Update – MCP Routing & Credential Quality-of-Life
 
 - **Google OAuth auto-refresh** is now baked into `useAuth`.  The browser silently renews the Google `provider_token` two minutes before expiry and stores the fresh token in `localStorage.googleToken`. Drive/Gmail commands never break.
@@ -249,3 +258,19 @@ The UI supports slash‐commands for Zapier via the MCP gateway.
     /zapier list zaps
     /zapier trigger zap <id>
     ```
+
+## ⚡ Patch – July 2025 (final week)
+
+### Front-end
+* Vite dev-server now proxies both `/api/*` and `/mcp/*` to `localhost:3002`; you can run `npm run dev` without setting `VITE_MCP_API`.
+* Provider portals persist OpenAI, Anthropic, and Gemini keys to Supabase (`user_integration_accounts`) and sync across tabs via Realtime.
+
+### Back-end
+* Gateway updated to support **Anthropic api03** keys – uses `x-api-key` and `/v1/messages` when key starts with `sk-ant-api…`.
+
+### How to test
+1. Start the gateway on :3002 with the latest code.
+2. `npm run dev` (front-end) and hard-refresh the browser.
+3. Settings → Anthropic → "Test Key" should return **200 OK** with green status.
+
+---

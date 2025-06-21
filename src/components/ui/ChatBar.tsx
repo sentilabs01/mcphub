@@ -27,6 +27,7 @@ import { listZapierZaps, listZapierActions } from '../../services/zapierNLAServi
 import { splitMcpEndpoint } from '../../utils/zapier';
 import { safeGet } from '../../utils/safeLocal';
 import { fetchStoredSlackToken } from '../../services/slackService';
+import { useToken } from '../../hooks/useToken';
 
 const PROVIDER_OPTIONS: { label: string; value: LLMProvider }[] = [
   { label: 'OpenAI', value: 'openai' },
@@ -202,30 +203,47 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const lastSubmitRef = useRef<{ cmd: string; ts: number }>({ cmd: '', ts: 0 });
   // Ref lock to prevent duplicate submissions before React state updates propagate
   const inFlightRef = useRef(false);
+  // Unify token retrievals
+  const { token: githubTokenHook } = useToken('github');
+  const { token: slackTokenHook } = useToken('slack');
+  const { token: openaiTokenHook } = useToken('openai');
+  const { token: anthropicTokenHook } = useToken('anthropic');
+  const { token: googleTokenHook } = useToken('google');
 
   // Load settings and history from Supabase or localStorage on mount
   useEffect(() => {
     async function loadUserData() {
+      const LOAD_CHAT_HISTORY = false; // change to true to restore old behaviour
+
       if (user) {
         const settings = await getUserSettings(user.id);
-        if (settings) {
-          if (settings.llm_provider) setProvider(settings.llm_provider);
+        if (settings && settings.llm_provider) {
+          setProvider(settings.llm_provider);
         } else {
-          // fallback to localStorage
           const local = loadSettings();
           if (local.provider) setProvider(local.provider);
         }
-        const history = await getUserChatHistory(user.id);
-        if (history && history.length > 0) {
-          setMessages(history.map((h: any) => h.message));
-        } else {
-          setMessages([]);
+
+        if (LOAD_CHAT_HISTORY) {
+          const history = await getUserChatHistory(user.id);
+          if (history && history.length > 0) {
+            const deduped = history
+              .map((h: any) => h.message)
+              .filter((msg: any, idx: number, arr: any[]) => {
+                // Remove exact duplicates (role + content) keeping first occurrence
+                return arr.findIndex((m) => m.role === msg.role && m.content === msg.content) === idx;
+              });
+            setMessages(deduped);
+          }
         }
       } else {
-        // Not logged in: use localStorage
+        // Not logged in – still honour preferred provider but skip history
         const local = loadSettings();
         if (local.provider) setProvider(local.provider);
-        setMessages(loadHistory());
+        if (LOAD_CHAT_HISTORY) {
+          const dedupedLocal = loadHistory().filter((msg: any, idx: number, arr: any[]) => arr.findIndex((m: any) => m.role === msg.role && m.content === msg.content) === idx);
+          setMessages(dedupedLocal);
+        }
       }
     }
     loadUserData();
@@ -323,11 +341,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
             // Determine token for provider when required (best-effort)
             let token = '';
             if (providerKey === 'github') {
-              token = safeGet('github_token');
-              if (!token && user) {
-                const rec = await getCredential(user.id, 'github');
-                token = rec?.credentials?.token || '';
-              }
+              token = githubTokenHook;
             } else if (providerKey === 'openai') token = localStorage.getItem('openai_token') || '';
             else if (providerKey === 'anthropic') token = localStorage.getItem('anthropic_token') || '';
             else if (providerKey === 'google_drive') token = googleToken;
@@ -446,11 +460,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           cmdBody = cmdBody.replace(/\s+/g, ' ').trim();
         }
         // Use MCP protocol for GitHub commands
-        let githubToken = safeGet('github_token');
-        if (!githubToken && user) {
-          const rec = await getCredential(user.id, 'github');
-          githubToken = rec?.credentials?.token || '';
-        }
+        let githubToken = githubTokenHook;
         // Get MCP server for GitHub
         const server = await MCPServerService.getServerById('github');
         if (!server || !server.apiUrl) {
@@ -496,12 +506,28 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       if (processedInput.startsWith('/slack')) {
         const raw = processedInput.replace(/^\/slack\s*/i, '').trim();
         // Keep spaces; backend expects space-separated slugs (e.g. "connections open"). Lower-case for consistency
-        const slackCmd = raw.toLowerCase();
+        let slackCmd = raw.toLowerCase();
+        // Alias mapping: allow phrases like "list slack channels" or "get slack messages"
+        if (slackCmd.startsWith('list slack channels')) {
+          slackCmd = slackCmd.replace(/^list slack channels/, 'list channels').trim();
+        }
+        if (slackCmd.startsWith('get slack messages')) {
+          slackCmd = slackCmd.replace(/^get slack messages/, 'get messages').trim();
+        }
+
+        // Ensure required channel argument for "get messages"
+        if (slackCmd.startsWith('get messages')) {
+          const parts = slackCmd.split(/\s+/);
+          if (parts.length < 3) {
+            setMessages(prev => [...prev, { role: 'assistant', content: 'Usage: /slack get messages <channel> [limit]. Example: /slack get messages #general 20' }]);
+            setLoading(false);
+            return;
+          }
+        }
 
         // Retrieve Slack token – localStorage first, then Supabase creds
-        let slackToken: string = localStorage.getItem('slack_token') || '';
+        let slackToken: string = slackTokenHook;
         if (!slackToken) {
-          // Try backend store
           slackToken = await fetchStoredSlackToken();
         }
 
@@ -1033,9 +1059,9 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           { role: 'user', content: processedInput },
         ],
         apiKeys: {
-          openai: localStorage.getItem(`${provider}_token`) || undefined,
-          anthropic: localStorage.getItem(`${provider}_token`) || undefined,
-          google: localStorage.getItem(`${provider}_token`) || undefined,
+          openai: openaiTokenHook || undefined,
+          anthropic: anthropicTokenHook || undefined,
+          google: googleTokenHook || undefined,
         },
       });
       // Try to parse the assistant's message as JSON for marketplace filters
