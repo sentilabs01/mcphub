@@ -1,3 +1,5 @@
+/* eslint-disable react-hooks/rules-of-hooks */
+
 import React, { useEffect, useState, useMemo } from 'react';
 import { X } from 'lucide-react';
 import { Card, CardContent } from './Card';

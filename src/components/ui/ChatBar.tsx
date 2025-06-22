@@ -279,7 +279,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     }
 
     syncProviderTokens();
-    // eslint-disable-next-line
+     
   }, [user]);
 
   // Save settings to Supabase/localStorage when provider change
@@ -334,7 +334,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
     }
 
     // Extract provider key (text between '/' and first space or end)
-    const match = input.match(/^\/([a-zA-Z0-9_\-]+)/);
+    const match = input.match(/^\/([a-zA-Z0-9_-]+)/);
     const providerKey = match ? match[1] : '';
 
     if (providerKey && VALID_PROVIDER_IDS.includes(providerKey) && !liveCommandCache[providerKey]) {
@@ -468,7 +468,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           cmdBody = cmdBody.replace(/\s+/g, ' ').trim();
         }
         // Use MCP protocol for GitHub commands
-        let githubToken = githubTokenHook;
+        const githubToken = githubTokenHook;
         // Get MCP server for GitHub
         const server = await MCPServerService.getServerById('github');
         if (!server || !server.apiUrl) {
@@ -617,7 +617,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         const rawParts = rawNotion.trim().split(/\s+/);
         const cmdToken = rawParts[0].toLowerCase();
         let notionCmd = cmdToken;
-        let cmdParams: Record<string, any> = {};
+        const cmdParams: Record<string, any> = {};
 
         if (cmdToken === 'page' && rawParts[1]) {
           cmdParams.pageId = rawParts[1];
@@ -628,7 +628,7 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           if (titleMatch) cmdParams.title = titleMatch[1];
         } else if (cmdToken === 'update-page' && rawParts[1]) {
           cmdParams.pageId = rawParts[1];
-          const kvMatch = rawNotion.match(/\s+([a-zA-Z0-9_]+)=\"?([^\"]+)\"?/);
+          const kvMatch = rawNotion.match(/\s+([a-zA-Z0-9_]+)="?([^"]+)"?/);
           if (kvMatch) {
             const [, key, val] = kvMatch;
             cmdParams[key] = val;
