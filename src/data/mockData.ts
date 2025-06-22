@@ -119,7 +119,7 @@ export const mockInstallations: Installation[] = [
       errorRate: 0.2
     },
     configuration: {
-      repositories: ['sentilabs/mcp-hub', 'sentilabs/ai-toolkit'],
+      repositories: ['sentilabs/mcp-messenger', 'sentilabs/ai-toolkit'],
       webhookUrl: 'https://api.sentilabs.com/webhook'
     }
   },
@@ -186,7 +186,7 @@ export const mockAPIEndpoints: APIEndpoint[] = [
         request: { page: 1, per_page: 10 },
         response: {
           repositories: [
-            { id: 1, name: 'mcp-hub', full_name: 'sentilabs/mcp-hub', private: false },
+            { id: 1, name: 'mcp-messenger', full_name: 'sentilabs/mcp-messenger', private: false },
             { id: 2, name: 'ai-toolkit', full_name: 'sentilabs/ai-toolkit', private: true }
           ],
           total_count: 2

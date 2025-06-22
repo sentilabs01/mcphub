@@ -110,7 +110,7 @@ export async function callLLMProvider({ provider, messages, apiKeys, context }: 
     const githubRes = await fetch('https://api.github.com/user', {
       headers: {
         'Authorization': `token ${githubToken}`,
-        'User-Agent': 'MCP-Hub'
+        'User-Agent': 'MCP-Messenger'
       }
     });
     if (!githubRes.ok) {

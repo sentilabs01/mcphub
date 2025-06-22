@@ -51,7 +51,7 @@ app.get('/api/slack/auth', (req, res) => {
 
 // Simple callback placeholder – exchange code for tokens in real impl
 app.get('/api/slack/callback', (req, res) => {
-  res.send('Slack OAuth completed. Implement token exchange here and redirect to MCP Hub.');
+  res.send('Slack OAuth completed. Implement token exchange here and redirect to MCP Messenger.');
 });
 
 // Simple router

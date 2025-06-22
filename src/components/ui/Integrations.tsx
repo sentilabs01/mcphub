@@ -259,7 +259,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
     setZapierResult('');
     try {
       await triggerZapierWebhook(zapierUrl, {
-        source: 'MCP-Hub',
+        source: 'MCP Messenger',
         triggeredAt: new Date().toISOString(),
       });
       setZapierResult('✅ Zap triggered successfully!');

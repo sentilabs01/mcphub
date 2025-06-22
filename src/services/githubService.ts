@@ -47,7 +47,7 @@ export async function verifyGithubToken(token: string): Promise<any> {
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: 'application/vnd.github.v3+json',
-      'User-Agent': 'MCP-Hub'
+      'User-Agent': 'MCP-Messenger'
     }
   });
   if (!res.ok) {

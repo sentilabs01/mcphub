@@ -1,4 +1,4 @@
-# Slash / MCP
+# MCP Messenger
 
 ## 🚀 June 22 2025 – Jira MVP, Port Alignment & UI polish
 
@@ -109,7 +109,7 @@
 - See the original Contributing section below.
 
 ## Overview
-Slash / MCP is an integration platform and marketplace for AI-powered developer tools, focused on free and open tools, multi-account management, and Model Context Protocol (MCP) support. The platform features a modern gallery UI, always-on AI ChatBar (supporting OpenAI, Anthropic, Gemini), secure API key management (via Supabase), and command dropdowns for each provider.
+MCP Messenger is an integration platform and marketplace for AI-powered developer tools, focused on free and open tools, multi-account management, and Model Context Protocol (MCP) support. The platform features a modern gallery UI, always-on AI ChatBar (supporting OpenAI, Anthropic, Gemini), secure API key management (via Supabase), and command dropdowns for each provider.
 
 ---
 
@@ -238,7 +238,7 @@ For questions or support, contact [Senti Labs](https://sentilabs.com)
 
 ## Automation Connectors
 
-MCP-Hub now ships first-class workflow integrations:
+MCP Messenger now ships first-class workflow integrations:
 
 | Platform | Asset | How to install |
 |----------|-------|----------------|
