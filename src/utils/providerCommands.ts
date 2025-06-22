@@ -50,13 +50,6 @@ export const PROVIDER_COMMANDS = {
       { label: 'Local Search', value: '/brave local <query>' },
     ],
   },
-  figma: {
-    homepage: 'https://figma.com/',
-    commands: [
-      { label: 'List Files', value: '/figma files' },
-      { label: 'Get File', value: '/figma file <file_id>' },
-    ],
-  },
   chroma: {
     homepage: 'https://www.trychroma.com/',
     commands: [
@@ -67,8 +60,30 @@ export const PROVIDER_COMMANDS = {
   slack: {
     homepage: 'https://slack.com/',
     commands: [
-      { label: 'List Channels', value: '/slack channels' },
+      { label: 'List Channels', value: '/slack list channels' },
       { label: 'Send Message', value: '/slack send <channel> <message>' },
+      { label: 'Open Socket Connection', value: '/slack connections open' },
+      { label: 'List Authorizations', value: '/slack authorizations list' },
+      { label: 'Export App Manifest', value: '/slack manifest export' },
+      { label: 'Import App Manifest', value: '/slack manifest import <url_or_json>' },
+    ],
+  },
+  jira: {
+    homepage: 'https://www.atlassian.com/software/jira',
+    commands: [
+      { label: 'List Projects', value: '/jira projects' },
+      { label: 'Create Issue', value: '/jira create-issue <project> "Summary" "Description"' },
+      { label: 'Get Issue', value: '/jira issue <issue-key>' },
+      { label: 'Update Issue', value: '/jira update-issue <issue-key> "field=value"' },
+    ],
+  },
+  notion: {
+    homepage: 'https://www.notion.so/',
+    commands: [
+      { label: 'List Pages', value: '/notion pages' },
+      { label: 'Create Page', value: '/notion create-page "Title"' },
+      { label: 'Retrieve Page', value: '/notion page <page-id>' },
+      { label: 'Update Page', value: '/notion update-page <page-id> "property=value"' },
     ],
   },
   '21stdev': {
@@ -151,15 +166,19 @@ export const PROVIDER_COMMANDS = {
     homepage: 'https://zapier.com/',
     commands: [
       { label: 'Trigger Zap', value: '/zapier trigger' },
-      { label: 'List Zaps', value: '/zapier list' },
+      { label: 'List Zaps', value: '/zapier list-zaps' },
+      { label: 'List Actions', value: '/zapier list-actions' },
+      { label: 'Run Zap', value: '/zapier run-zap <id>' },
+      { label: 'Find Zap', value: '/zapier find-zap "name or id"' },
       { label: 'Zap Info', value: '/zapier info zap_id' },
     ],
   },
   make_com: {
     homepage: 'https://www.make.com/',
     commands: [
-      { label: 'Execute Command', value: '/make execute command' },
-      { label: 'Execute Workflow', value: '/make execute workflow' },
+      { label: 'List Scenarios', value: '/make list scenarios' },
+      { label: 'Run Scenario', value: '/make run <scenarioId>' },
+      { label: 'Trigger Webhook', value: '/make webhook <url>' },
     ],
   },
   n8n: {
@@ -178,36 +197,12 @@ export const PROVIDER_COMMANDS = {
       { label: 'Delete Event', value: '/calendar delete event_id' },
     ],
   },
-  bolt: {
-    homepage: 'https://bolt.dev/',
-    commands: [
-      { label: 'Search Web', value: '/bolt search <query>' },
-      { label: 'Summarize URL', value: '/bolt summarize <url>' },
-      { label: 'Automate Task', value: '/bolt automate <description>' },
-    ],
-  },
-  loveable: {
-    homepage: 'https://loveable.io/',
-    commands: [
-      { label: 'List Projects', value: '/loveable projects' },
-      { label: 'Create Project', value: '/loveable create-project "My App"' },
-      { label: 'Deploy', value: '/loveable deploy <project>' },
-    ],
-  },
   cursor: {
     homepage: 'https://cursor.sh/',
     commands: [
       { label: 'Open Repository', value: '/cursor open <repo-url>' },
       { label: 'Search Code', value: '/cursor search <query>' },
       { label: 'Code Complete', value: '/cursor complete <file>' },
-    ],
-  },
-  '21st_dev': {
-    homepage: 'https://21st.dev/',
-    commands: [
-      { label: 'Generate Component', value: '/21st_dev generate <component>' },
-      { label: 'List Components', value: '/21st_dev list' },
-      { label: 'Refactor', value: '/21st_dev refactor <file>' },
     ],
   },
 }; 

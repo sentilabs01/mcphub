@@ -511,6 +511,40 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       }
       // --- End GitHub Chat Commands ---
 
+      // --- Jira Chat Commands ---
+      if (processedInput.startsWith('/jira')) {
+        const raw = processedInput.replace(/^\/jira\s*/i, '').trim();
+        if (!raw) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Usage: /jira <command>. Example: /jira list issues' }]);
+          setLoading(false);
+          return;
+        }
+
+        // Convert spaces to kebab-case slug (e.g. "list issues" -> "list-issues")
+        const jiraCmd = raw.toLowerCase().replace(/\s+/g, '-');
+
+        // Route through the Jira MCP server – credentials handled on backend.
+        const server = await MCPServerService.getServerById('jira');
+        if (!server || !server.apiUrl) {
+          setMessages(prev => [...prev, { role: 'assistant', content: 'Jira MCP server not found.' }]);
+          setLoading(false);
+          return;
+        }
+
+        try {
+          const result = await runMCPCommand(server.apiUrl, '', jiraCmd, {}, 'jira');
+          setMessages(prev => [...prev, { role: 'assistant', content: prettyPrintResult('jira', result) }]);
+        } catch (err: any) {
+          setMessages(prev => [...prev, { role: 'assistant', content: err.message || 'Failed to run Jira command.' }]);
+        }
+
+        setLoading(false);
+        window.dispatchEvent(new CustomEvent('mcp:command-end', { detail: { input: processedInput } }));
+        ended = true;
+        return;
+      }
+      // --- End Jira Chat Commands ---
+
       // --- Slack Chat Commands ---
       if (processedInput.startsWith('/slack')) {
         const raw = processedInput.replace(/^\/slack\s*/i, '').trim();
@@ -1298,32 +1332,35 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
             handleSend();
           }}
         >
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={e => { setInput(e.target.value); setHistoryIndex(null); }}
-            onKeyDown={handleInputKeyDown}
-            placeholder="Type your message..."
-            className={`flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'bg-black text-white border-zinc-700 placeholder-zinc-400' : 'bg-white text-black border-gray-300 placeholder-gray-400'}`}
-            autoComplete="off"
-          />
-          {showCommandSuggestions && filteredCommands.length > 0 && (
-            <div className={`absolute left-0 right-0 mt-1 rounded shadow-lg z-50 max-h-60 overflow-y-auto
-              ${darkMode ? 'bg-zinc-800 border border-zinc-600 text-white' : 'bg-white border border-gray-300 text-black'}`}
-            >
-              {filteredCommands.map((c, i) => (
-                <div
-                  key={c.command + i}
-                  className={`px-4 py-2 cursor-pointer text-sm flex flex-col ${darkMode ? 'hover:bg-zinc-700' : 'hover:bg-gray-100'}`}
-                  onMouseDown={(e) => { e.preventDefault(); handleSuggestionClick(c.command); }}
-                >
-                  <span className="font-semibold">{c.command}</span>
-                  <span className={`text-xs ${darkMode ? 'text-zinc-400' : 'text-gray-500'}`}>{c.provider}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="relative flex-1">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={e => { setInput(e.target.value); setHistoryIndex(null); }}
+              onKeyDown={handleInputKeyDown}
+              placeholder="Type your message..."
+              className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${darkMode ? 'bg-black text-white border-zinc-700 placeholder-zinc-400' : 'bg-white text-black border-gray-300 placeholder-gray-400'}`}
+              autoComplete="off"
+            />
+            {showCommandSuggestions && filteredCommands.length > 0 && (
+              <div
+                className={`absolute left-0 right-0 top-full mt-1 rounded shadow-lg z-50 max-h-60 overflow-y-auto
+                  ${darkMode ? 'bg-zinc-800 border border-zinc-600 text-white' : 'bg-white border border-gray-300 text-black'}`}
+              >
+                {filteredCommands.map((c, i) => (
+                  <div
+                    key={c.command + i}
+                    className={`px-4 py-2 cursor-pointer text-sm flex flex-col ${darkMode ? 'hover:bg-zinc-700' : 'hover:bg-gray-100'}`}
+                    onMouseDown={(e) => { e.preventDefault(); handleSuggestionClick(c.command); }}
+                  >
+                    <span className="font-semibold">{c.command}</span>
+                    <span className={`text-xs ${darkMode ? 'text-zinc-400' : 'text-gray-500'}`}>{c.provider}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <Button type="submit" className="px-4 py-2" disabled={loading}>Send</Button>
         </form>
         {/* Command history dropdown (if you want to show it, e.g. below the input) */}

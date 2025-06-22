@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { safeGet } from '../utils/safeLocal';
 import type { MCPServer } from '../types';
 
 export class MCPServerService {
@@ -195,7 +196,7 @@ export class MCPServerService {
       apiUrl: (() => {
         try {
           // Allow users to override a single server API endpoint via localStorage (UI settings panel)
-          const override = typeof window !== 'undefined' ? localStorage.getItem(`mcp_${data.id}_api_url`) : null;
+          const override = typeof window !== 'undefined' ? safeGet(`mcp_${data.id}_api_url`, '') || null : null;
           if (override) return override;
         } catch {
           /* no-op: access to localStorage might fail in some environments */

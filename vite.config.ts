@@ -9,8 +9,8 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:3002',
-      '/mcp': 'http://localhost:3002',
+      '/api': 'http://localhost:3001',
+      '/mcp': 'http://localhost:3001',
     },
   },
 });

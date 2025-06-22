@@ -50,6 +50,5 @@ export const N8n: Story = { render: () => Portal('n8n') };
 export const ZapierCLI: Story = { render: () => Portal('zapier_cli') };
 export const Calendar: Story = { render: () => Portal('google_calendar') };
 export const Bolt: Story = { render: () => Portal('bolt') };
-export const Loveable: Story = { render: () => Portal('loveable') };
 export const Cursor: Story = { render: () => Portal('cursor') };
 export const TwentyFirstDev: Story = { render: () => Portal('21st_dev') }; 

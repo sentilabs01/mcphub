@@ -12,10 +12,53 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+// In-memory token store per session (dev only)
+let savedSlackToken = '';
+
+app.get('/api/user/slack-token', (req, res) => {
+  res.json({ token: savedSlackToken });
+});
+
+app.post('/api/user/slack-token', (req, res) => {
+  const { token } = req.body || {};
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ error: 'token required' });
+  }
+  savedSlackToken = token.trim();
+  res.json({ ok: true });
+});
+
+app.delete('/api/user/slack-token', (req, res) => {
+  savedSlackToken = '';
+  res.json({ ok: true });
+});
+
+// Slack OAuth redirect helper (dev)
+app.get('/api/slack/auth', (req, res) => {
+  const clientId = req.query.client_id || process.env.SLACK_CLIENT_ID || '<YOUR_CLIENT_ID>';
+  const redirectUri = process.env.SLACK_REDIRECT_URI || 'http://localhost:3001/api/slack/callback';
+  const scopes = [
+    'connections:write',
+    'app_configurations:write',
+    'authorizations:read',
+    'commands',
+    'chat:write',
+    'channels:read'
+  ].join(',');
+  const url = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  res.redirect(url);
+});
+
+// Simple callback placeholder – exchange code for tokens in real impl
+app.get('/api/slack/callback', (req, res) => {
+  res.send('Slack OAuth completed. Implement token exchange here and redirect to MCP Hub.');
+});
+
 // Simple router
 const commandController = async (req, res) => {
   const { provider, command = '', apiKey = '' } = req.body;
   const provKey = (provider || '').toString().toLowerCase().trim();
+  console.log('[gateway]>>>>', provKey);
   try {
     switch (provKey) {
       case 'zapier': {
@@ -39,7 +82,7 @@ const commandController = async (req, res) => {
         const cmd = (command || '').toLowerCase().trim();
 
         // List Drive files (default)
-        if (/^(list( drive)? files|get drive files|list-drive-files|\/drive list|list)$/i.test(cmd)) {
+        if (/^(list(\s+drive)?\s+files|list\-files|get\s+drive\s+files|list\-drive\-files|\/drive\s+list|list)$/i.test(cmd)) {
           const r = await fetch('https://www.googleapis.com/drive/v3/files?pageSize=100&fields=files(id,name,mimeType,webViewLink,webContentLink)', {
             headers: { Authorization: `Bearer ${key}` },
           });
@@ -94,10 +137,47 @@ const commandController = async (req, res) => {
 
         return res.status(400).json({ error: 'Unsupported Google Calendar command', hint: 'Try "list events" or "list calendars"' });
       }
+      case 'gmail': {
+        const key = apiKey || req.headers.authorization?.replace('Bearer ', '');
+        if (!key) return res.status(401).json({ error: 'Missing Google OAuth token' });
+
+        const cmd = (command || '').toLowerCase().trim();
+
+        // List inbox messages (default)
+        if (cmd === '' || /^(list(\s+my)?\s+)?(inbox|emails|messages|list-inbox|list-messages)$/i.test(cmd)) {
+          const listRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20&labelIds=INBOX', {
+            headers: { Authorization: `Bearer ${key}` },
+          });
+          const listJson = await listRes.json();
+          if (!listRes.ok) return res.status(listRes.status).json(listJson);
+
+          // Fetch basic metadata (snippet, subject) for each id in parallel (but cap to 20)
+          const msgs = await Promise.all(
+            (listJson.messages || []).slice(0, 20).map(async (m) => {
+              try {
+                const r = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=metadata&metadataHeaders=Subject`, {
+                  headers: { Authorization: `Bearer ${key}` },
+                });
+                const j = await r.json();
+                if (!r.ok) return null;
+                return {
+                  id: j.id,
+                  snippet: j.snippet,
+                  subject: (j.payload?.headers || []).find((h) => h.name === 'Subject')?.value || '',
+                };
+              } catch {
+                return null;
+              }
+            })
+          );
+          return res.json(msgs.filter(Boolean));
+        }
+
+        return res.status(400).json({ error: 'Unsupported Gmail command', hint: 'Try "/gmail list inbox"' });
+      }
       case 'openai':
       case 'anthropic':
       case 'gemini':
-      case 'gmail':
       case 'github': {
         const key = apiKey || req.headers.authorization?.replace('Bearer ', '');
         if (!key) return res.status(401).json({ error: 'Missing GitHub token' });
@@ -179,11 +259,41 @@ const commandController = async (req, res) => {
           return res.status(500).json({ error: err.message || 'fetch failed' });
         }
       }
-      case 'make_api_run': {
-        const { token, scenarioId } = req.body;
-        if (!token || !scenarioId) return res.status(400).json({ error: 'token and scenarioId required' });
+      case 'make_api_validate': {
+        const { token, zone } = req.body;
+        if (!token) return res.status(400).json({ error: 'token required' });
+        const host = zone ? `https://${zone}` : 'https://api.make.com';
         try {
-          const r = await fetch(`https://api.make.com/v2/scenarios/${scenarioId}/run`, {
+          const r = await fetch(`${host}/api/v2/users/me`, {
+            headers: { 'Authorization': `Token ${token}` },
+          });
+          return res.status(r.ok ? 200 : r.status).json({ ok: r.ok });
+        } catch (err) {
+          return res.status(500).json({ error: err.message || 'fetch failed' });
+        }
+      }
+      case 'make_api_list': {
+        const { token, zone } = req.body;
+        if (!token) return res.status(400).json({ error: 'token required' });
+        const host = zone ? `https://${zone}` : 'https://api.make.com';
+        try {
+          const r = await fetch(`${host}/api/v2/scenarios`, {
+            headers: { 'Authorization': `Token ${token}` },
+          });
+          const txt = await r.text();
+          let json;
+          try { json = JSON.parse(txt); } catch { json = { raw: txt }; }
+          return res.status(r.status).json(json);
+        } catch (err) {
+          return res.status(500).json({ error: err.message || 'fetch failed' });
+        }
+      }
+      case 'make_api_run': {
+        const { token, scenarioId, zone } = req.body;
+        if (!token || !scenarioId) return res.status(400).json({ error: 'token and scenarioId required' });
+        const host = zone ? `https://${zone}` : 'https://api.make.com';
+        try {
+          const r = await fetch(`${host}/api/v2/scenarios/${scenarioId}/run`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -212,6 +322,155 @@ const commandController = async (req, res) => {
         } catch (err) {
           return res.status(500).json({ error: err.message || 'fetch failed' });
         }
+      }
+      case 'zapier_mcp_cmd': {
+        const { url, token, command } = req.body;
+        if (!url || !token || !command) return res.status(400).json({ error: 'url, token, command required' });
+        try {
+          // Zapier MCP expects JSON-RPC style POST to base/execute (base ends before /sse)
+          const baseUrl = url.replace(/\/?(sse|stream)$/i, '').replace(/\/$/, '');
+          const endpoint = `${baseUrl}/execute`;
+
+          // ---- Parse command string into slug + args ----
+          const cmdParts = command.trim().match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [];
+          // For Zapier MCP we must pass the slug exactly as configured (often includes multiple underscores).
+          const slug = (cmdParts.shift() || '').trim();
+          const argObj = {};
+          for (const part of cmdParts) {
+            const kv = part.split('=');
+            if (kv.length === 2) {
+              const key = kv[0];
+              let value = kv[1];
+              if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                value = value.slice(1, -1);
+              }
+              argObj[key] = value;
+            }
+          }
+
+          const rpcBody = {
+            jsonrpc: '2.0',
+            id: Date.now(),
+            method: 'execute',
+            params: {
+              command: slug,
+              args: argObj,
+            },
+          };
+
+          const r = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(rpcBody),
+          });
+          const txt = await r.text();
+          let json;
+          try { json = JSON.parse(txt); } catch { json = { raw: txt }; }
+          return res.status(r.status).json(json);
+        } catch (err) {
+          return res.status(500).json({ error: err.message || 'fetch failed' });
+        }
+      }
+      case 'slack': {
+        const key = apiKey || req.headers.authorization?.replace('Bearer ', '');
+        if (!key) return res.status(401).json({ error: 'Missing Slack token' });
+
+        const cmd = (command || '').toLowerCase().trim();
+
+        if (cmd === 'connections open' || cmd === 'open connection' || cmd === 'connections-open') {
+          const r = await fetch('https://slack.com/api/apps.connections.open', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${key}` },
+          });
+          const j = await r.json();
+          return res.status(r.status).json(j);
+        }
+
+        if (cmd.startsWith('authorizations')) {
+          const r = await fetch('https://slack.com/api/authorizations.list?limit=100', {
+            headers: { Authorization: `Bearer ${key}` },
+          });
+          const j = await r.json();
+          return res.status(r.status).json(j);
+        }
+
+        if (cmd === 'manifest export') {
+          const r = await fetch('https://slack.com/api/apps.manifest.export', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${key}` },
+          });
+          const j = await r.json();
+          return res.status(r.status).json(j);
+        }
+
+        const importMatch = cmd.match(/^manifest import\s+(.+)/);
+        if (importMatch) {
+          let manifestJson = importMatch[1].trim();
+          try {
+            // If user passed a URL, fetch it
+            if (/^https?:\/\//i.test(manifestJson)) {
+              const rUrl = await fetch(manifestJson);
+              manifestJson = await rUrl.text();
+            }
+            const manifest = JSON.parse(manifestJson);
+            const r = await fetch('https://slack.com/api/apps.manifest.import', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${key}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ manifest }),
+            });
+            const j = await r.json();
+            return res.status(r.status).json(j);
+          } catch (err) {
+            return res.status(400).json({ error: 'Invalid manifest JSON or URL' });
+          }
+        }
+
+        // ---------- Added basic Slack helpers ----------
+
+        // /slack list channels   (aliases: channels, list-channels)
+        if (cmd === 'list channels' || cmd === 'channels' || cmd === 'list-channels') {
+          const r = await fetch('https://slack.com/api/conversations.list?limit=100', {
+            headers: { Authorization: `Bearer ${key}` },
+          });
+          const j = await r.json();
+          return res.status(r.status).json(j);
+        }
+
+        // /slack send <channel> <text…>
+        const sendMatch = cmd.match(/^send\s+(\S+)\s+(.+)/);
+        if (sendMatch) {
+          const [, channel, text] = sendMatch;
+          const r = await fetch('https://slack.com/api/chat.postMessage', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${key}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ channel, text }),
+          });
+          const j = await r.json();
+          return res.status(r.status).json(j);
+        }
+
+        // /slack get messages <channel> [limit]
+        const histMatch = cmd.match(/^get\s+messages\s+(\S+)(?:\s+(\d+))?/);
+        if (histMatch) {
+          const [, channel, lim] = histMatch;
+          const limit = lim || 20;
+          const r = await fetch(
+            `https://slack.com/api/conversations.history?channel=${channel}&limit=${limit}`,
+            { headers: { Authorization: `Bearer ${key}` } }
+          );
+          const j = await r.json();
+          return res.status(r.status).json(j);
+        }
+
+        return res.status(400).json({ error: 'Unsupported Slack command', hint: 'connections open | authorizations list | manifest export | manifest import <json|url>' });
       }
       default:
         return res.status(400).json({ error: 'Unsupported provider' });

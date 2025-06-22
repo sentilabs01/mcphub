@@ -58,7 +58,7 @@ export async function callLLMProvider({ provider, messages, apiKeys, context }: 
   }
 
   if (provider === 'anthropic') {
-    const response = await fetch('http://localhost:3001/api/command', {
+    const response = await fetch('http://localhost:3002/api/command', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

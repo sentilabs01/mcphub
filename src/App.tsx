@@ -9,13 +9,15 @@ import { Card } from './components/ui/Card';
 import { ChatBar } from './components/ui/ChatBar';
 import { IntegrationsGallery } from './components/ui/IntegrationsGallery';
 import { GoogleOAuthProvider } from '@react-oauth/google';
-import { Chrome, Sun, Moon, Minus } from 'lucide-react';
+import { Chrome, Sun, Moon, Minus, MessageCircle } from 'lucide-react';
 import { CarouselDemo } from './components/ui/carousel-demo';
 import { Avatar, AvatarImage } from './components/ui/avatar';
 import Draggable from 'react-draggable';
 import { Resizable } from 're-resizable';
 import { ServerStatusIndicator } from './components/ui/ServerStatusIndicator';
 import { IntegrationsDropdown } from './components/ui/IntegrationsDropdown';
+import { useSupabaseCredentialSync } from './hooks/useSupabaseCredentialSync';
+import { CommandStatusIndicator } from './components/ui/CommandStatusIndicator';
 // import { EnhancedChatUI } from './components/ui/EnhancedChatUI';
 // import { useAuth } from './hooks/useAuth';
 // import { AuthModal } from './components/auth/AuthModal';
@@ -71,6 +73,21 @@ function MinimalAppContent() {
     localStorage.setItem('darkMode', darkMode ? 'true' : 'false');
   }, [darkMode]);
 
+  // Keep local tokens in sync with Supabase changes
+  useSupabaseCredentialSync(user?.id);
+
+  // Google connection state – used to colour dot on avatar
+  const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
+  useEffect(() => {
+    const check = () => {
+      const tok = localStorage.getItem('google_access_token') || localStorage.getItem('google_token');
+      setGoogleConnected(tok ? true : false);
+    };
+    check();
+    const id = setInterval(check, 5000);
+    return () => clearInterval(id);
+  }, []);
+
   if (loading) {
     return <div className={`min-h-screen flex items-center justify-center text-xl ${darkMode ? 'bg-black text-white' : 'bg-gray-50'}`}>Loading...</div>;
   }
@@ -111,6 +128,7 @@ function MinimalAppContent() {
       <div className="absolute top-4 right-4 flex flex-col items-end space-y-2 z-50">
         <div className="flex items-center space-x-2">
           <ServerStatusIndicator />
+          <CommandStatusIndicator />
           <Button
             variant="ghost"
             onClick={() => setDarkMode(dm => !dm)}
@@ -126,16 +144,18 @@ function MinimalAppContent() {
               className="ml-2 p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
               aria-label="Open chat"
             >
-              <Minus className="w-6 h-6" />
+              <MessageCircle className="w-6 h-6" />
             </button>
           )}
           <div className="relative group">
             <Avatar>
               <AvatarImage src={user?.user_metadata?.picture || ''} alt={user?.email || 'User'} />
             </Avatar>
-            <div className={`absolute right-0 mt-2 w-32 rounded shadow-lg z-50 ${darkMode ? 'bg-zinc-900 text-white' : 'bg-white text-black'} opacity-0 group-hover:opacity-100 transition-opacity`}>
-              <button onClick={signOut} className="block w-full text-left px-4 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">Sign Out</button>
-            </div>
+            {googleConnected !== null && (
+              <span
+                className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${googleConnected ? 'bg-green-500' : 'bg-red-500'}`}
+              />
+            )}
           </div>
         </div>
         {/* Integrations dropdown */}
@@ -185,7 +205,7 @@ function MinimalAppContent() {
             handleStyles={{
               bottomRight: { width: '18px', height: '18px', right: 0, bottom: 0, background: 'transparent', borderRadius: '0 0 8px 0', cursor: 'se-resize', transition: 'background 0.2s' },
               bottomLeft: { width: '18px', height: '18px', left: 0, bottom: 0, background: 'transparent', borderRadius: '0 0 0 8px', cursor: 'sw-resize', transition: 'background 0.2s' },
-              bottom: { height: '18px', bottom: 0, left: 0, right: 0, background: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', cursor: 's-resize', transition: 'background 0.2s' },
+              bottom: { height: '18px', bottom: 0, left: 0, right: 0, background: 'transparent', cursor: 's-resize', transition: 'background 0.2s' },
               left: { width: '10px', left: 0, top: '18px', bottom: '18px', background: 'transparent', cursor: 'w-resize', transition: 'background 0.2s' },
               right: { width: '10px', right: 0, top: '18px', bottom: '18px', background: 'transparent', cursor: 'e-resize', transition: 'background 0.2s' },
             }}
@@ -202,7 +222,7 @@ function MinimalAppContent() {
               </button>
             </div>
             <div className="p-0 w-full h-[calc(100%-1.5rem)] flex flex-col">
-              <ChatBar />
+              <ChatBar darkMode={darkMode} />
             </div>
           </Resizable>
         </Draggable>

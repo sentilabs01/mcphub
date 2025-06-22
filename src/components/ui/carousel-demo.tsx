@@ -1,7 +1,7 @@
 import { MarqueeLogos } from './MarqueeLogos';
 import { PROVIDERS } from '../../data/providers';
 
-const HIDDEN_PROVIDER_IDS = new Set(["slack", "chroma", "jupyter"]);
+const HIDDEN_PROVIDER_IDS = new Set(["slack", "chroma", "jupyter", "lovable"]);
 
 const partnerLogos = PROVIDERS.filter(p => !HIDDEN_PROVIDER_IDS.has(p.id)).map(p => ({ src: p.logo, alt: p.name }));
 

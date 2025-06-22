@@ -90,18 +90,25 @@ export const PROVIDERS: ProviderMeta[] = [
     commands: ['chat', 'summarize', 'generate-code', 'explain', 'translate'],
   },
   {
-    id: 'figma',
-    name: 'Figma',
-    logo: '/logos/Figma-logo.svg',
-    mcpServerId: 'figma',
-    commands: ['List files', 'Get design', 'Export asset'],
-  },
-  {
     id: 'slack',
     name: 'Slack',
     logo: '/logos/Slack_icon_2019.svg.png',
     mcpServerId: 'slack',
     commands: ['Send message', 'List channels', 'Get messages'],
+  },
+  {
+    id: 'jira',
+    name: 'Jira',
+    logo: '/logos/jira-1.svg',
+    mcpServerId: 'jira',
+    commands: ['List projects', 'Create issue', 'Get issue', 'Update issue'],
+  },
+  {
+    id: 'notion',
+    name: 'Notion',
+    logo: '/logos/Notion-logo.svg.png',
+    mcpServerId: 'notion',
+    commands: ['List pages', 'Create page', 'Retrieve page', 'Update page'],
   },
   {
     id: 'chroma',
@@ -129,7 +136,11 @@ export const PROVIDERS: ProviderMeta[] = [
     name: 'Make.com',
     logo: '/logos/Make-app-icon.png',
     mcpServerId: 'make_com',
-    commands: ['Execute command', 'Execute workflow']
+    commands: [
+      'List scenarios  (/make list)',
+      'Run scenario    (/make run <id>)',
+      'Trigger webhook (/make webhook <url>)'
+    ]
   },
   {
     id: 'n8n',
@@ -153,32 +164,12 @@ export const PROVIDERS: ProviderMeta[] = [
     commands: ['List events', 'Create event', 'Update event', 'Delete event'],
   },
   {
-    id: 'bolt',
-    name: 'Bolt',
-    logo: '/logos/bolt.jpg',
-    mcpServerId: 'bolt',
-    commands: ['search', 'summarize', 'automate-task'],
-  },
-  {
-    id: 'loveable',
-    name: 'Loveable',
-    logo: '/logos/lovable-logo-icon.svg',
-    mcpServerId: 'loveable',
-    commands: ['list-projects', 'create-project', 'deploy'],
-  },
-  {
     id: 'cursor',
     name: 'Cursor',
-    logo: '/logos/cursor.png',
+    logo: '/logos/cursor light mode(1).png',
+    logoDark: '/logos/cursor.png',
     mcpServerId: 'cursor',
     commands: ['open', 'search', 'code-complete'],
-  },
-  {
-    id: '21st_dev',
-    name: '21st DEV',
-    logo: '/logos/21st dev logo.png',
-    mcpServerId: '21st_dev',
-    commands: ['generate-ui', 'list-components', 'refactor'],
   },
 ];
 

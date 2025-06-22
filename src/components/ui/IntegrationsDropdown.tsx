@@ -6,7 +6,7 @@ interface IntegrationsDropdownProps {
   darkMode?: boolean;
 }
 
-const HIDDEN_PROVIDER_IDS = new Set(["chroma", "jupyter", "figma", "bolt", "21st_dev"]);
+const HIDDEN_PROVIDER_IDS = new Set(["chroma", "jupyter", "figma", "bolt", "21st_dev", "lovable"]);
 const ACTIVE_PROVIDERS = PROVIDERS.filter(p => !HIDDEN_PROVIDER_IDS.has(p.id))
   .sort((a, b) => a.name.localeCompare(b.name));
 

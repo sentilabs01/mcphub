@@ -108,6 +108,22 @@ export function prettyPrintResult(provider: string, data: any): string {
         }
         break;
       }
+      case 'slack': {
+        // Expect Slack Web API shapes: { channels: [...] } or direct array
+        let chans: any = null;
+        if (Array.isArray(data)) chans = data;
+        else if (data && Array.isArray((data as any).channels)) chans = (data as any).channels;
+        else if (data && (data as any).raw_response && Array.isArray((data as any).raw_response.channels)) {
+          chans = (data as any).raw_response.channels;
+        } else if (data && Array.isArray((data as any).output)) {
+          chans = (data as any).output;
+        }
+        if (Array.isArray(chans)) {
+          if (chans.length === 0) return 'No channels found.';
+          return chans.slice(0, 30).map((c:any, idx:number)=> `${idx+1}. ${c.id || ''}  |  ${c.name || '(no name)'}${c.is_private ? ' (private)' : ''}`).join('\n');
+        }
+        break;
+      }
       default:
         break;
     }

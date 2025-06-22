@@ -19,6 +19,7 @@ import { validateMakeCredentials } from '../../services/makeService';
 import { validateSlackToken, fetchStoredSlackToken, saveSlackTokenToBackend, deleteStoredSlackToken } from '../../services/slackService';
 import { prettyPrintResult } from '../../utils/prettyPrint';
 import { safeSet, safeRemove } from '../../utils/safeLocal';
+import { validateNotionToken } from '../../services/notionService';
 
 interface ProviderPortalModalProps {
   isOpen: boolean;
@@ -379,7 +380,7 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
               googleAccessToken ? (
                 <span className="text-xs text-green-500">Connected as {userEmail || 'Gmail user'} via Supabase login</span>
               ) : (
-                <span className="text-xs text-yellow-500">Not connected. Sign in first.</span>
+                <span className="text-xs text-yellow-500">Please sign in via the main Google login at top-right.</span>
               )
             ) : provider.id === 'zapier' || provider.id === 'zapier_cli' ? (
               <ZapierKeyManager darkMode={darkMode} />
@@ -389,6 +390,10 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
               <MakeKeyManager darkMode={darkMode} />
             ) : provider.id === 'slack' ? (
               <SlackKeyManager darkMode={darkMode} feedback={slackFeedback} setFeedback={setSlackFeedback} testing={slackTesting} setTesting={setSlackTesting} />
+            ) : provider.id === 'jira' ? (
+              <JiraOAuthManager darkMode={darkMode} />
+            ) : provider.id === 'notion' ? (
+              <NotionKeyManager darkMode={darkMode} />
             ) : (
               <div className={`text-xs ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Account management UI coming soon.</div>
             )}
@@ -421,6 +426,8 @@ export const ProviderPortalModal: React.FC<ProviderPortalModalProps> = ({ isOpen
             ) : provider.id === 'make_com' ? (
               <div className={`text-xs mt-1 ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Credentials stored locally.</div>
             ) : provider.id === 'zapier' || provider.id === 'zapier_cli' ? (
+              <div className={`text-xs mt-1 ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Credentials stored locally.</div>
+            ) : provider.id === 'notion' ? (
               <div className={`text-xs mt-1 ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>Credentials stored locally.</div>
             ) : (
               <div className={`text-xs ${darkMode ? 'text-zinc-400' : 'text-gray-400'}`}>No recent status.</div>
@@ -608,7 +615,12 @@ const GeminiKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, 
       <input
         type="password"
         value={geminiKey}
-        onChange={e => { setGeminiKey(e.target.value); setGeminiKeySaved(false); setFeedback(null); }}
+        onChange={e => {
+          const raw = e.target.value.trim();
+          const match = raw.match(/[A-Za-z0-9]{32}/); // Make API tokens are 32-char alphanum
+          setGeminiKey(match ? match[0] : raw);
+          setGeminiKeySaved(false);
+        }}
         placeholder="AIza..."
         className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
         autoComplete="off"
@@ -635,10 +647,23 @@ const GeminiKeyManager: React.FC<{ darkMode?: boolean, feedback: string | null, 
 const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const [driveToken, setDriveToken] = React.useState('');
   const [driveEmail, setDriveEmail] = React.useState('');
-  const { user } = useAuth();
+  const { user, session } = useAuth();
 
   React.useEffect(() => {
     (async () => {
+      // 0. Supabase provider token (primary)
+      const providerTok = session?.provider_token || '';
+      if (providerTok) {
+        setDriveToken(providerTok);
+        fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${providerTok}` },
+        })
+          .then(r => (r.ok ? r.json() : null))
+          .then(u => setDriveEmail(u?.email || ''))
+          .catch(() => setDriveEmail(''));
+        return;
+      }
+
       // 1. Local storage token (legacy / implicit flow)
       const localTok = localStorage.getItem('google_drive_token') || '';
       if (localTok) {
@@ -677,7 +702,7 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         } catch {/* ignore */}
       }
     })();
-  }, [user]);
+  }, [user, session]);
 
   const driveLogin = useGoogleLogin({
     scope: 'https://www.googleapis.com/auth/drive',
@@ -725,7 +750,7 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           <Button onClick={handleDisconnect} variant="destructive" size="sm">Disconnect</Button>
         </>
       ) : (
-        <Button onClick={handleConnect} className={`${darkMode ? 'bg-blue-700 text-white' : ''}`}>Connect Google</Button>
+        <span className="text-xs text-yellow-500">Please sign in via the main Google login at top-right.</span>
       )}
       <span className="text-xs text-gray-500">Connect once to enable all Google providers (Drive, Gmail, etc.).</span>
     </div>
@@ -735,12 +760,23 @@ const DriveOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 const GmailOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const [gmailToken, setGmailToken] = React.useState('');
   const [gmailEmail, setGmailEmail] = React.useState('');
-  const { user: userAuth } = useAuth();
+  const { user: userAuth, session: supaSession } = useAuth();
 
   React.useEffect(() => {
     (async () => {
-      // 1. Prefer any token saved locally (legacy flow or implicit login)
-      const localTok = localStorage.getItem('gmail_token') || '';
+      // 0. Supabase provider token (primary)
+      const providerTok = supaSession?.provider_token || '';
+      if (providerTok) {
+        setGmailToken(providerTok);
+        fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${providerTok}` },
+        })
+          .then(r => (r.ok ? r.json() : null))
+          .then(u => setGmailEmail(u?.email || ''))
+          .catch(() => setGmailEmail(''));
+        return;
+      }
+      const localTok = localStorage.getItem('gmail_token') || localStorage.getItem('google_drive_token') || '';
       if (localTok) {
         setGmailToken(localTok);
         try {
@@ -755,7 +791,7 @@ const GmailOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       // 2. Otherwise, check Supabase credentials inserted by the Edge Function
       if (userAuth?.id) {
         try {
-          const rec = await getCredential(userAuth.id, 'gmail');
+          const rec = await getCredential(userAuth.id, 'gmail') || await getCredential(userAuth.id, 'google_drive');
           const tok = rec?.credentials?.token || rec?.credentials?.access_token || rec?.credentials?.accessToken || '';
           if (tok) {
             setGmailToken(tok);
@@ -772,7 +808,7 @@ const GmailOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         }
       }
     })();
-  }, [userAuth]);
+  }, [userAuth, supaSession]);
 
   const handleLoginSuccess = (cred: any) => {
     safeSet('gmail_token', cred.credential);
@@ -817,7 +853,7 @@ const GmailOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
           <Button onClick={handleDisconnect} variant="destructive" size="sm">Disconnect</Button>
         </>
       ) : (
-        <Button onClick={connectGmail} className={`${darkMode ? 'bg-blue-700 text-white' : ''}`}>Connect Google</Button>
+        <span className="text-xs text-yellow-500">Please sign in via the main Google login at top-right.</span>
       )}
       <span className="text-xs text-gray-500">Connect once to enable Gmail commands.</span>
     </div>
@@ -1036,7 +1072,12 @@ const ZapierKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         <input
           type="password"
           value={apiKey}
-          onChange={e => { setApiKey(e.target.value); setApiKeySaved(false); }}
+          onChange={e => {
+            const raw = e.target.value.trim();
+            const match = raw.match(/[A-Za-z0-9]{32}/); // Make API tokens are 32-char alphanum
+            setApiKey(match ? match[0] : raw);
+            setApiKeySaved(false);
+          }}
           placeholder="zapier_nla_key..."
           className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
         />
@@ -1066,7 +1107,12 @@ const ZapierKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         <input
           type="password"
           value={privKey}
-          onChange={e => { setPrivKey(e.target.value); setPrivSaved(false); setFeedback(null); }}
+          onChange={e => {
+            const raw = e.target.value.trim();
+            const match = raw.match(/[A-Za-z0-9]{32}/); // Make API tokens are 32-char alphanum
+            setPrivKey(match ? match[0] : raw);
+            setPrivSaved(false);
+          }}
           placeholder="key..."
           className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
         />
@@ -1138,7 +1184,12 @@ const N8nKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       <input
         type="password"
         value={apiKey}
-        onChange={e => { setApiKey(e.target.value); setSaved(false); }}
+        onChange={e => {
+          const raw = e.target.value.trim();
+          const match = raw.match(/[A-Za-z0-9]{32}/); // Make API tokens are 32-char alphanum
+          setApiKey(match ? match[0] : raw);
+          setSaved(false);
+        }}
         placeholder="key..."
         className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
       />
@@ -1159,8 +1210,9 @@ const N8nKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 
 const MakeKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const [zone,  setZone]  = React.useState('us2.make.com');      // <-- edit default if needed
-  const [token, setToken] = React.useState('');
-  const [tokenType, setTokenType] = React.useState<'mcp' | 'api'>('mcp');
+  const [mcpToken, setMcpToken] = React.useState('');
+  const [apiToken, setApiToken] = React.useState('');
+  const [activeType, setActiveType] = React.useState<'mcp' | 'api'>('mcp');
   const [saved,   setSaved]   = React.useState(false);
   const [testing, setTesting] = React.useState(false);
   const [feedback,setFeedback]= React.useState<string | null>(null);
@@ -1172,19 +1224,22 @@ const MakeKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
       getCredential(user.id, 'make_com').then(rec => {
         if (rec) {
           setZone(rec.credentials.zone   || 'us2.make.com');
-          setToken(rec.credentials.token || '');
-          setTokenType(rec.credentials.type || 'mcp');
+          setMcpToken(rec.credentials.mcpToken || rec.credentials.token || '');
+          setApiToken(rec.credentials.apiToken || '');
+          setActiveType(rec.credentials.active || 'mcp');
           setSaved(true);
         }
       });
     } else {
-      const locTok = localStorage.getItem('makeToken') || '';
       const locZone= localStorage.getItem('makeZone')  || 'us2.make.com';
-      const locType = localStorage.getItem('makeTokenType') as 'mcp'|'api'|null;
-      if (locTok) {
-        setToken(locTok);
+      const locMcp= localStorage.getItem('makeMcpToken') || '';
+      const locApi= localStorage.getItem('makeApiToken') || '';
+      const locActive = localStorage.getItem('makeActive') as 'mcp'|'api'|null;
+      if (locMcp || locApi) {
+        setMcpToken(locMcp);
+        setApiToken(locApi);
         setZone(locZone);
-        setTokenType(locType || 'mcp');
+        setActiveType(locActive || (locMcp ? 'mcp' : 'api'));
         setSaved(true);
       }
     }
@@ -1192,20 +1247,24 @@ const MakeKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
 
   const save = async () => {
     if (!user) return;
-    await saveCredential(user.id, 'make_com', { zone, token, type: tokenType });
+    await saveCredential(user.id, 'make_com', { zone, mcpToken, apiToken, active: activeType });
     safeSet('makeZone', zone);
-    safeSet('makeToken', token);
-    safeSet('makeTokenType', tokenType);
+    safeSet('makeMcpToken', mcpToken);
+    safeSet('makeApiToken', apiToken);
+    safeSet('makeActive', activeType);
     setSaved(true);
   };
   const remove = async () => {
     if (!user) return;
     await deleteCredential(user.id, 'make_com');
     safeRemove('makeZone');
-    safeRemove('makeToken');
-    safeRemove('makeTokenType');
+    safeRemove('makeMcpToken');
+    safeRemove('makeApiToken');
+    safeRemove('makeActive');
     setZone('us2.make.com');
-    setToken('');
+    setMcpToken('');
+    setApiToken('');
+    setActiveType('mcp');
     setSaved(false);
   };
 
@@ -1213,14 +1272,13 @@ const MakeKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const test = async () => {
     setTesting(true); setFeedback(null);
     try {
+      const bodyObj: any = activeType === 'api'
+        ? { provider: 'make_api_validate', zone, token: apiToken || mcpToken }
+        : { provider: 'make_mcp_test', zone, token: mcpToken };
       const res = await fetch('http://localhost:3002/api/command',{
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({
-          provider : 'make_mcp_test',
-          zone     : zone,
-          token    : token,
-        })
+        body: JSON.stringify(bodyObj)
       });
       setFeedback(res.ok ? 'Connection successful ✅' : 'Connection failed');
     } catch (e:any) {
@@ -1237,14 +1295,15 @@ const MakeKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
         placeholder="us2.make.com"
         className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700' : ''}`}
       />
-      <label className="text-xs font-medium">Token Type</label>
-      <select value={tokenType} onChange={e=>{setTokenType(e.target.value as any); setSaved(false);}} className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700' : ''}`}>
-        <option value="mcp">MCP Token</option>
-        <option value="api">API Token</option>
+      <label className="text-xs font-medium">Active Token</label>
+      <select value={activeType} onChange={e=>{setActiveType(e.target.value as any); setSaved(false);}} className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700' : ''}`}>
+        <option value="mcp">MCP</option>
+        <option value="api">API</option>
       </select>
+
       <label className="text-xs font-medium">MCP Token</label>
       <input
-        value={token}
+        value={mcpToken}
         onChange={e=>{
           const raw = e.target.value.trim();
           // If user pastes full https://<zone>/mcp/api/v1/u/<token>/sse
@@ -1255,16 +1314,28 @@ const MakeKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
               const maybeToken = parts[5] || '';
               if (maybeToken) {
                 setZone(u.host);
-                setToken(maybeToken);
+                setMcpToken(maybeToken);
                 setSaved(false);
                 return;
               }
             } catch {}
           }
-          setToken(raw);
+          setMcpToken(raw);
           setSaved(false);
         }}
         placeholder="e9518fba-17f2-4098-…"
+        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700' : ''}`}
+      />
+      <label className="text-xs font-medium">API Token</label>
+      <input
+        value={apiToken}
+        onChange={e=>{
+          const raw = e.target.value.trim();
+          const match = raw.match(/[A-Za-z0-9]{32}/); // Make API tokens are 32-char alphanum
+          setApiToken(match ? match[0] : raw);
+          setSaved(false);
+        }}
+        placeholder="paBboN3H62u8B…"
         className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700' : ''}`}
       />
       <div className="flex items-center space-x-2">
@@ -1478,6 +1549,178 @@ const OpenAIKeyManager: React.FC<{ darkMode?: boolean, feedback?: string | null,
         <div className={`text-xs mt-1 ${openAIFeedback.includes('valid') ? 'text-green-600' : 'text-red-500'}`}>{openAIFeedback}</div>
       )}
       <span className="text-xs text-gray-500">Required for all OpenAI commands. Your key is stored privately and synced to your account.</span>
+    </div>
+  );
+};
+
+// Notion key manager
+const NotionKeyManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
+  const { user } = useAuth();
+  const [notionToken, setNotionToken] = React.useState('');
+  const [saved, setSaved] = React.useState(false);
+  const [feedback, setFeedback] = React.useState<string | null>(null);
+  const [testing, setTesting] = React.useState(false);
+
+  React.useEffect(() => {
+    (async () => {
+      if (user) {
+        const rec = await getCredential(user.id, 'notion');
+        const tok = rec?.credentials?.token || '';
+        if (tok) safeSet('notion_token', tok);
+        setNotionToken(tok);
+        setSaved(!!tok);
+      } else {
+        const stored = localStorage.getItem('notion_token') || '';
+        setNotionToken(stored);
+        setSaved(!!stored);
+      }
+    })();
+  }, [user]);
+
+  const handleSave = async () => {
+    safeSet('notion_token', notionToken);
+    if (user) await saveCredential(user.id, 'notion', { token: notionToken });
+    setSaved(true);
+    setFeedback('Token saved!');
+    setTimeout(() => setFeedback(null), 2000);
+  };
+
+  const handleRemove = async () => {
+    safeRemove('notion_token');
+    if (user) await deleteCredential(user.id, 'notion');
+    setNotionToken('');
+    setSaved(false);
+    setFeedback('Token removed');
+    setTimeout(() => setFeedback(null), 2000);
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      // Prefer MCP server proxy when available to avoid CORS
+      const { MCPServerService } = await import('../../services/mcpServerService');
+      const server = await MCPServerService.getServerById('notion');
+      const ok = await validateNotionToken(notionToken, server?.apiUrl);
+      setFeedback(ok ? 'Token is valid ✅' : 'Token rejected by Notion');
+    } catch (err: any) {
+      setFeedback('Test failed: ' + (err.message || 'unknown'));
+    } finally {
+      setTesting(false);
+      setTimeout(() => setFeedback(null), 4000);
+    }
+  };
+
+  return (
+    <div className="flex flex-col space-y-2">
+      <label className="text-xs font-medium">Notion Internal Integration Token <span className="text-red-500">*</span></label>
+      <input
+        type="password"
+        value={notionToken}
+        onChange={e => { setNotionToken(e.target.value); setSaved(false); setFeedback(null); }}
+        placeholder="secret_xxx"
+        className={`border rounded px-3 py-2 text-sm ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : ''}`}
+        autoComplete="off"
+      />
+      <div className="flex items-center space-x-2">
+        <Button onClick={handleSave} disabled={!notionToken || saved} size="sm">{saved ? 'Saved' : 'Save'}</Button>
+        {saved && <Button onClick={handleRemove} variant="destructive" size="sm">Remove</Button>}
+        <Button onClick={handleTest} disabled={!notionToken || testing} size="sm" variant="secondary">{testing ? 'Testing…' : 'Test Key'}</Button>
+      </div>
+      {feedback && <div className={`text-xs mt-1 ${feedback.includes('valid') ? 'text-green-600' : 'text-red-500'}`}>{feedback}</div>}
+    </div>
+  );
+};
+
+// Add JiraOAuthManager definition after SlackKeyManager or NotionKeyManager definitions
+const JiraOAuthManager: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
+  const [connected, setConnected] = React.useState<boolean>(false);
+  const [loading, setLoading] = React.useState<boolean>(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  // On mount, attempt to fetch integration status from backend (best-effort)
+  React.useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        const backendBase = import.meta.env.VITE_BACKEND_URL || '';
+        const res = await fetch(`${backendBase}/api/jira/status`);
+        const json = await res.json();
+        setConnected(!!json?.connected);
+      } catch {
+        // Silently ignore – backend route might not exist yet
+        setConnected(false);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const fetchJsonSafe = async (input: RequestInfo, init?: RequestInit) => {
+    const res = await fetch(input, init);
+    if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) throw new Error('Invalid JSON response');
+    return res.json();
+  };
+
+  const pickFirst = async (paths: string[], opts?: RequestInit): Promise<any> => {
+    let lastErr: any;
+    for (const p of paths) {
+      try {
+        return await fetchJsonSafe(p, opts);
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error('All endpoints failed');
+  };
+
+  const handleConnect = async () => {
+    try {
+      setLoading(true);
+      const backendBase = import.meta.env.VITE_BACKEND_URL || '';
+      const data = await pickFirst([`${backendBase}/api/jira/url`, `${backendBase}/api/auth/jira/url`]);
+      if (data && data.authorizationUrl) {
+        window.location.href = data.authorizationUrl;
+      } else {
+        setError('Backend did not return authorizationUrl');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to start OAuth flow.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    try {
+      setLoading(true);
+      const backendBase = import.meta.env.VITE_BACKEND_URL || '';
+      await pickFirst([`${backendBase}/api/jira/disconnect`, `${backendBase}/api/auth/jira/disconnect`], { method: 'POST' });
+      setConnected(false);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col space-y-2">
+      <label className="text-xs font-medium">Jira Account</label>
+      {connected ? (
+        <>
+          <span className="text-xs text-green-500">Connected</span>
+          <Button onClick={handleDisconnect} size="sm" variant="destructive" disabled={loading}>Disconnect</Button>
+        </>
+      ) : (
+        <>
+          <span className="text-xs text-yellow-500">Not connected</span>
+          <Button onClick={handleConnect} size="sm" disabled={loading}>{loading ? 'Connecting…' : 'Connect Jira'}</Button>
+          {error && <span className="text-xs text-red-500">{error}</span>}
+        </>
+      )}
+      <span className="text-xs text-gray-500">OAuth handled by backend; no credentials are stored in the browser.</span>
     </div>
   );
 }; 

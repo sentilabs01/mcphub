@@ -1,5 +1,19 @@
 # Slash / MCP
 
+## 🚀 June 22 2025 – Jira MVP, Port Alignment & UI polish
+
+* **Jira connector ready:** Front-end now supports OAuth (3-LO) flow and slash commands (`/jira list projects`, `create issue`, etc.).
+* **Unified backend port:** All MCP providers now default to **http://localhost:3001/api**. Run this once in Supabase to update legacy rows:
+
+  ```sql
+  update mcp_servers
+  set    apiurl = regexp_replace(apiurl, 'localhost:3002', 'localhost:3001')
+  where  apiurl like 'http://localhost:3002%';
+  ```
+* **`VITE_BACKEND_URL` env-var:** Front-end will prefix every `/api/...` call when this var is present (e.g. `VITE_BACKEND_URL=http://localhost:3001`).
+* **Google status dot:** The separate "Google Connected" banner is gone. A green / red dot overlays the avatar to indicate Google OAuth status (polls `localStorage.google_access_token`).
+* **Command suggestions UX:** Autocomplete dropdown now renders **below** the text-box instead of covering it.
+
 ## 🚀 June 2025 Token-Persistence & Gateway Hardening
 
 * **Safe local storage wrappers** (`safeSet`, `safeGet`, `safeRemove`) replace every direct `localStorage.*` call so tokens persist even in Safari/iOS privacy mode.

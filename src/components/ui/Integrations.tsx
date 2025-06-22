@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from './Button';
 import { fetchUserRepos } from '../../services/githubService';
 import { listDriveFiles, listGmailMessages } from '../../services/googleService';
+import { listSlackChannels } from '../../services/slackService';
 import { triggerZapierWebhook } from '../../services/zapierService';
 import { useAuth } from '../../hooks/useAuth';
 import {
@@ -12,6 +13,8 @@ import {
 } from '../../services/userIntegrationAccountsService';
 import { PROVIDER_COMMANDS } from '../../utils/providerCommands';
 import { useChatBarInput } from '../../context/ChatBarInputContext';
+import { safeSet, safeRemove } from '../../utils/safeLocal';
+import { splitMcpEndpoint } from '../../utils/zapier';
 
 // Static URLs for automation connectors
 const MAKE_APP_JSON_URL = '/integrations/makecom/mcp-app.json';
@@ -33,6 +36,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
   const [newAnthropicToken, setNewAnthropicToken] = useState('');
   const [newOpenAIToken, setNewOpenAIToken] = useState('');
   const [newGeminiToken, setNewGeminiToken] = useState('');
+  const [newSlackToken, setNewSlackToken] = useState('');
   // State for active account IDs
   const [activeGithubId, setActiveGithubId] = useState<string | null>(null);
   const [activeDriveId, setActiveDriveId] = useState<string | null>(null);
@@ -40,6 +44,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
   const [activeAnthropicId, setActiveAnthropicId] = useState<string | null>(null);
   const [activeOpenAIId, setActiveOpenAIId] = useState<string | null>(null);
   const [activeGeminiId, setActiveGeminiId] = useState<string | null>(null);
+  const [activeSlackId, setActiveSlackId] = useState<string | null>(null);
   const [selectedCommand, setSelectedCommand] = useState<{ [provider: string]: string }>({});
 
   // Load accounts and active IDs on mount/user change
@@ -54,6 +59,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
         setActiveAnthropicId(localStorage.getItem('activeAnthropicId'));
         setActiveOpenAIId(localStorage.getItem('activeOpenAIId'));
         setActiveGeminiId(localStorage.getItem('activeGeminiId'));
+        setActiveSlackId(localStorage.getItem('activeSlackId'));
       }
     }
     load();
@@ -76,6 +82,8 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
       setNewOpenAIToken('');
     } else if (provider === 'google') {
       setNewGeminiToken('');
+    } else if (provider === 'slack') {
+      setNewSlackToken('');
     }
   };
 
@@ -89,6 +97,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
     if (activeAnthropicId === id) setActiveAnthropicId(null);
     if (activeOpenAIId === id) setActiveOpenAIId(null);
     if (activeGeminiId === id) setActiveGeminiId(null);
+    if (activeSlackId === id) setActiveSlackId(null);
   };
 
   // Set active account handler
@@ -97,40 +106,51 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
     console.log('Setting active account:', { provider, id });
     if (provider === 'github') {
       setActiveGithubId(id);
-      localStorage.setItem('activeGithubId', id);
+      safeSet('activeGithubId', id);
       token = accounts.find(a => a.provider === 'github' && a.id === id)?.credentials?.token || '';
       console.log('Saving githubToken:', token);
-      localStorage.setItem('githubToken', token);
+      safeSet('githubToken', token);
     } else if (provider === 'google_drive') {
       setActiveDriveId(id);
-      localStorage.setItem('activeDriveId', id);
+      safeSet('activeDriveId', id);
       token = accounts.find(a => a.provider === 'google_drive' && a.id === id)?.credentials?.token || '';
       console.log('Saving googleToken:', token);
-      localStorage.setItem('googleToken', token);
+      safeSet('googleToken', token);
     } else if (provider === 'gmail') {
       setActiveGmailId(id);
-      localStorage.setItem('activeGmailId', id);
+      safeSet('activeGmailId', id);
       token = accounts.find(a => a.provider === 'gmail' && a.id === id)?.credentials?.token || '';
       console.log('Saving gmailToken:', token);
-      localStorage.setItem('gmailToken', token);
+      safeSet('gmailToken', token);
     } else if (provider === 'anthropic') {
       setActiveAnthropicId(id);
-      localStorage.setItem('activeAnthropicId', id);
+      safeSet('activeAnthropicId', id);
       token = accounts.find(a => a.provider === 'anthropic' && a.id === id)?.credentials?.token || '';
       console.log('Saving anthropic_token:', token);
-      localStorage.setItem('anthropic_token', token);
+      safeSet('anthropic_token', token);
     } else if (provider === 'openai') {
       setActiveOpenAIId(id);
-      localStorage.setItem('activeOpenAIId', id);
+      safeSet('activeOpenAIId', id);
       token = accounts.find(a => a.provider === 'openai' && a.id === id)?.credentials?.token || '';
       console.log('Saving openai_token:', token);
-      localStorage.setItem('openai_token', token);
+      safeSet('openai_token', token);
     } else if (provider === 'google') {
       setActiveGeminiId(id);
-      localStorage.setItem('activeGeminiId', id);
+      safeSet('activeGeminiId', id);
       token = accounts.find(a => a.provider === 'google' && a.id === id)?.credentials?.token || '';
       console.log('Saving google_token:', token);
-      localStorage.setItem('google_token', token);
+      safeSet('google_token', token);
+    } else if (provider === 'slack') {
+      setActiveSlackId(id);
+      safeSet('activeSlackId', id);
+      token = accounts.find(a => a.provider === 'slack' && a.id === id)?.credentials?.token || '';
+      // Only persist to localStorage if it looks like a Slack bot/app token to avoid accidental GitHub PAT overwrite
+      if (token.startsWith('xoxb-') || token.startsWith('xapp-1-')) {
+        console.log('Saving slack_token:', token);
+        safeSet('slack_token', token);
+      } else {
+        console.warn('[Integrations] Not saving slack_token, value does not look like Slack token');
+      }
     }
   };
 
@@ -141,6 +161,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
   const anthropicAccounts = accounts.filter(a => a.provider === 'anthropic');
   const openaiAccounts = accounts.filter(a => a.provider === 'openai');
   const geminiAccounts = accounts.filter(a => a.provider === 'google');
+  const slackAccounts = accounts.filter(a => a.provider === 'slack');
 
   // Get active tokens
   const activeGithubToken = githubAccounts.find(a => a.id === activeGithubId)?.credentials?.token || '';
@@ -149,6 +170,7 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
   const activeAnthropicToken = anthropicAccounts.find(a => a.id === activeAnthropicId)?.credentials?.token || '';
   const activeOpenAIToken = openaiAccounts.find(a => a.id === activeOpenAIId)?.credentials?.token || '';
   const activeGeminiToken = geminiAccounts.find(a => a.id === activeGeminiId)?.credentials?.token || '';
+  const activeSlackToken = slackAccounts.find(a => a.id === activeSlackId)?.credentials?.token || '';
 
   // Zapier
   const [zapierUrl, setZapierUrl] = useState('');
@@ -174,22 +196,22 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
   const [makeApiKey, setMakeApiKey] = useState<string>(() => localStorage.getItem('makeApiKey') || '');
 
   const handleSaveMakeCreds = () => {
-    localStorage.setItem('makeBaseUrl', makeBaseUrl);
-    localStorage.setItem('makeApiKey', makeApiKey);
+    safeSet('makeBaseUrl', makeBaseUrl);
+    safeSet('makeApiKey', makeApiKey);
   };
 
   // Zapier NLA (AI Actions) – API Key stored locally
   const [zapierApiKey, setZapierApiKey] = useState<string>(() => localStorage.getItem('zapierApiKey') || '');
   const handleSaveZapierApiKey = () => {
-    localStorage.setItem('zapierApiKey', zapierApiKey);
+    safeSet('zapierApiKey', zapierApiKey);
   };
 
   // Zapier Private App – Base URL + API Key stored locally
   const [zapierBaseUrl, setZapierBaseUrl] = useState<string>(() => localStorage.getItem('zapierBaseUrl') || '');
   const [zapierPrivKey, setZapierPrivKey] = useState<string>(() => localStorage.getItem('zapierPrivKey') || '');
   const handleSaveZapierPrivCreds = () => {
-    localStorage.setItem('zapierBaseUrl', zapierBaseUrl);
-    localStorage.setItem('zapierPrivKey', zapierPrivKey);
+    safeSet('zapierBaseUrl', zapierBaseUrl);
+    safeSet('zapierPrivKey', zapierPrivKey);
   };
 
   // n8n credentials
@@ -197,8 +219,8 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
   const [n8nApiKey, setN8nApiKey] = useState<string>(() => localStorage.getItem('n8nApiKey') || '');
 
   const handleSaveN8nCreds = () => {
-    localStorage.setItem('n8nBaseUrl', n8nBaseUrl);
-    localStorage.setItem('n8nApiKey', n8nApiKey);
+    safeSet('n8nBaseUrl', n8nBaseUrl);
+    safeSet('n8nApiKey', n8nApiKey);
   };
 
   // Save GitHub token
@@ -306,6 +328,63 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
   // Helper to show partial token
   const partialToken = (token: string) => token ? token.slice(0, 4) + '...' + token.slice(-4) : '';
 
+  // Add new state hooks after zapierApiKey within Zapier integration section
+  const [zapierMcpEndpoint, setZapierMcpEndpoint] = useState<string>(() => localStorage.getItem('zapier_mcp_endpoint') || '');
+  const [zapierMcpFeedback, setZapierMcpFeedback] = useState<string | null>(null);
+
+  const handleSaveZapierMcpEndpoint = () => {
+    if (!zapierMcpEndpoint.trim()) return;
+    setZapierMcpFeedback(null);
+    try {
+      const parsed = splitMcpEndpoint(zapierMcpEndpoint.trim());
+      if (!parsed) throw new Error('Endpoint format should be https://.../mcp/<token>');
+      safeSet('zapier_mcp_endpoint', zapierMcpEndpoint.trim());
+      safeSet('zapier_mcp_url', parsed.base);
+      safeSet('zapier_mcp_token', parsed.token);
+      setZapierMcpFeedback('Saved!');
+    } catch (err: any) {
+      setZapierMcpFeedback(err.message || 'Failed to save');
+    }
+  };
+
+  // Slack
+  const [slackResult, setSlackResult] = useState('');
+  const [slackChannels, setSlackChannels] = useState<any[]>([]);
+  const [slackLoading, setSlackLoading] = useState(false);
+
+  const handleSlackList = async () => {
+    setSlackLoading(true);
+    setSlackResult('');
+    setSlackChannels([]);
+    try {
+      const ch = await listSlackChannels(activeSlackToken);
+      if (!ch || ch.length === 0) {
+        setSlackResult('No channels found or invalid token.');
+      } else {
+        setSlackChannels(ch);
+      }
+    } catch (err) {
+      setSlackResult('Error fetching channels.');
+    } finally {
+      setSlackLoading(false);
+    }
+  };
+
+  // Save Slack token (local & backend account)
+  const handleSlackTokenChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const token = e.target.value;
+    setNewSlackToken(token);
+    if (user) {
+      const accounts = await getUserIntegrationAccounts(user.id);
+      const slackAcc = accounts.find((a: any) => a.provider === 'slack');
+      if (slackAcc) {
+        await updateUserIntegrationAccount(slackAcc.id, { token });
+      } else {
+        await addUserIntegrationAccount(user.id, 'slack', 'default', { token });
+      }
+    }
+  };
+
   return (
     <div className={`w-full max-w-xl mx-auto rounded-xl border shadow-md p-6 flex flex-col space-y-8 mt-8 ${darkMode ? 'bg-[#232323] border-zinc-700 text-white' : 'bg-white border-gray-200 text-black'}`}>
       {/* Zapier */}
@@ -342,6 +421,17 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
             className={`border rounded-lg px-3 py-2 text-sm w-full ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : 'border-gray-300'}`}
           />
           <Button onClick={handleSaveZapierApiKey} disabled={!zapierApiKey} className={darkMode ? 'bg-blue-700 text-white' : ''}>Save API Key Locally</Button>
+        </div>
+        {/* Zapier MCP Endpoint */}
+        <div className="mt-4 space-y-2">
+          <input
+            type="text"
+            value={zapierMcpEndpoint}
+            onChange={e => setZapierMcpEndpoint(e.target.value)}
+            placeholder="Zapier MCP Endpoint (https://actions.zapier.com/mcp/.../sse)"
+            className={`border rounded-lg px-3 py-2 text-sm w-full ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : 'border-gray-300'}`}
+          />
+          <Button onClick={handleSaveZapierMcpEndpoint} disabled={!zapierMcpEndpoint} className={darkMode ? 'bg-blue-700 text-white' : ''}>Save MCP Endpoint</Button>
         </div>
       </div>
       )}
@@ -702,6 +792,61 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
           <input type="password" placeholder="API Key" value={zapierPrivKey} onChange={e => setZapierPrivKey(e.target.value)} className={`border rounded-lg px-3 py-2 text-sm w-full ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : 'border-gray-300'}`} />
           <Button onClick={handleSaveZapierPrivCreds} className={darkMode ? 'bg-blue-700 text-white' : ''}>Save Credentials Locally</Button>
         </div>
+      </div>
+      )}
+
+      {/* Slack Multi-Account Management */}
+      {(!selectedProvider || selectedProvider === 'slack') && (
+      <div>
+        <h2 className="text-lg font-bold mb-2">Slack Integration</h2>
+        <div className="mb-2 flex space-x-2">
+          <input type="password" value={newSlackToken} onChange={handleSlackTokenChange} placeholder="Slack Token (xapp-1-...)" className={`border rounded-lg px-2 py-1 text-sm flex-1 ${darkMode ? 'bg-zinc-800 text-white border-zinc-700 placeholder-zinc-400' : 'border-gray-300'}`} />
+          <Button onClick={() => { handleAddAccount('slack', newSlackToken); setNewSlackToken(''); }} disabled={!newSlackToken} className={darkMode ? 'bg-blue-700 text-white' : ''}>Add Account</Button>
+        </div>
+        <div className="mb-2">
+          {slackAccounts.length > 0 && <div className="text-xs mb-1">Accounts:</div>}
+          <ul className="space-y-1">
+            {slackAccounts.map(acc => (
+              <li key={acc.id} className={`flex items-center space-x-2 p-2 rounded ${activeSlackId === acc.id ? 'bg-blue-900/30 border border-blue-500' : ''}`}>
+                <span className="font-mono text-xs">{acc.account_label} ({partialToken(acc.credentials?.token)})</span>
+                <Button size="sm" onClick={() => handleSetActive('slack', acc.id)} disabled={activeSlackId === acc.id} className={darkMode ? 'bg-blue-700 text-white' : ''}>{activeSlackId === acc.id ? 'Active' : 'Set Active'}</Button>
+                <Button size="sm" variant="destructive" onClick={() => handleRemoveAccount(acc.id)}>Remove</Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <Button onClick={handleSlackList} disabled={!activeSlackToken || slackLoading} className={darkMode ? 'bg-blue-700 text-white' : ''}>{slackLoading ? 'Listing...' : 'List My Channels'}</Button>
+        {slackResult && <div className="mt-2 text-sm text-red-600">{slackResult}</div>}
+        {slackChannels.length > 0 && (
+          <div className="mt-2 text-sm text-gray-700">
+            <b>Your Channels:</b>
+            <ul className="list-disc ml-5 mt-1">
+              {slackChannels.map((channel: any) => (
+                <li key={channel.id}>{channel.name}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {/* Command Dropdown */}
+        {PROVIDER_COMMANDS['slack'] && (
+          <div className="mb-2 flex items-center space-x-2">
+            <select
+              value={selectedCommand['slack'] || ''}
+              onChange={e => {
+                setSelectedCommand(cmds => ({ ...cmds, slack: e.target.value }));
+                setInput(e.target.value);
+              }}
+              className="border rounded-lg px-2 py-1 text-sm"
+            >
+              <option value="">Select a command...</option>
+              {/* @ts-ignore */}
+              {((PROVIDER_COMMANDS['slack'] as any).commands || PROVIDER_COMMANDS['slack']).map((cmd: any) => (
+                <option key={cmd.value} value={cmd.value}>{cmd.label}</option>
+              ))}
+            </select>
+            <Button onClick={() => setInput(selectedCommand['slack'] || '')} disabled={!selectedCommand['slack']}>Run</Button>
+          </div>
+        )}
       </div>
       )}
     </div>

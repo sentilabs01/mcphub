@@ -16,7 +16,7 @@ import { PROVIDERS } from "../../data/providers";
 import type { ProviderMeta } from "../../data/providers";
 
 // Providers to hide from carousel
-const HIDDEN_PROVIDER_IDS = new Set(["chroma", "jupyter", "figma", "bolt", "21st_dev"]);
+const HIDDEN_PROVIDER_IDS = new Set(["chroma", "jupyter", "figma", "bolt", "21st_dev", "lovable"]);
 
 // Filtered list used throughout this component
 const ACTIVE_PROVIDERS = PROVIDERS.filter(p => !HIDDEN_PROVIDER_IDS.has(p.id));
@@ -77,7 +77,6 @@ export const AnimatedCarousel = ({
     '/logos/chatgptWHT.png': '/logos/openai-icon-505x512-pr6amibw.png',
     '/logos/anthropicwhiteSymbol.png': '/logos/anthropic-icon-tdvkiqisswbrmtkiygb0ia.webp',
     '/logos/github.png': '/logos/Octicons-mark-github.svg',
-    '/logos/cursor.png': '/logos/cursor light mode(1).png',
   };
 
   const colorToWhite: Record<string, string> = {

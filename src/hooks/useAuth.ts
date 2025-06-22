@@ -1,6 +1,7 @@
 import { useState, useEffect, createContext, useContext } from 'react';
 import { supabase } from '../lib/supabase';
 import type { User, Session } from '@supabase/supabase-js';
+import { safeSet, safeRemove } from '../utils/safeLocal';
 
 interface AuthContextType {
   user: User | null;
@@ -34,7 +35,7 @@ export const useAuthProvider = () => {
       // Persist Google provider token for Drive/Gmail helpers on first load
       if (session?.provider_token) {
         try {
-          localStorage.setItem('googleToken', session.provider_token);
+          safeSet('googleToken', session.provider_token);
         } catch {
           /* localStorage may be unavailable */
         }
@@ -50,7 +51,7 @@ export const useAuthProvider = () => {
       setLoading(false);
       if (session?.provider_token) {
         try {
-          localStorage.setItem('googleToken', session.provider_token);
+          safeSet('googleToken', session.provider_token);
         } catch {}
       }
     });
@@ -69,7 +70,7 @@ export const useAuthProvider = () => {
             setSession(data.session);
             // Keep Google provider token in localStorage for drive/gmail helpers
             if (data.session.provider_token)
-              localStorage.setItem('googleToken', data.session.provider_token);
+              safeSet('googleToken', data.session.provider_token);
           }
         } catch {
           /* refresh failed – user will be prompted on next request */
@@ -116,14 +117,14 @@ export const useAuthProvider = () => {
       setSession(null);
       setUser(null);
       try {
-        localStorage.removeItem('googleToken');
+        safeRemove('googleToken');
         // Remove Supabase auth tokens (access + refresh)
         Object.keys(localStorage).forEach(key => {
           if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
-            localStorage.removeItem(key);
+            safeRemove(key);
           }
           if (key.startsWith('sb-') && key.endsWith('-refresh-token')) {
-            localStorage.removeItem(key);
+            safeRemove(key);
           }
         });
       } catch {/* ignore */}

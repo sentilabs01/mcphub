@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { Button } from './Button';
 import { verifyGithubToken, fetchSavedGithubToken, saveGithubToken, deleteGithubToken } from '../../services/githubService';
+import { safeSet, safeRemove } from '../../utils/safeLocal';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -33,7 +34,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, d
         setSaved(!!tkn);
         if (tkn) {
           try {
-            localStorage.setItem('github_token', tkn);
+            safeSet('github_token', tkn);
           } catch {
             /* ignore */
           }
@@ -49,7 +50,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, d
       await saveGithubToken(githubToken);
       setSaved(true);
       try {
-        localStorage.setItem('github_token', githubToken);
+        safeSet('github_token', githubToken);
       } catch {}
       setFeedback('Token saved to your account.');
     } catch (err: any) {
@@ -68,7 +69,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, d
       await deleteGithubToken();
       setGithubToken('');
       setSaved(false);
-      try { localStorage.removeItem('github_token'); } catch {}
+      safeRemove('github_token');
       setFeedback('Token deleted.');
     } catch (err: any) {
       setFeedback(err.message || 'Failed to delete token');
