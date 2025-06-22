@@ -1,5 +1,79 @@
 # MCP Messenger
 
+MCP Messenger is an open-source integration hub that lets you connect AI/LLM providers and cloud services with **zero back-end code**.  Think *Zapier for developers* – but self-hosted, TypeScript-first, and built around the Model Context Protocol.
+
+---
+## ✨ Key Benefits
+
+* **Single chat interface** for OpenAI, Anthropic, Gemini, GitHub, Google Drive/Gmail, Zapier and more – no context-switching.
+* **One-click provider portals** – add / rotate API keys without redeploying.
+* **Self-host in minutes**: Vite + Supabase + Express.  No Docker required.
+* **Extensible**: drop a new provider module into `src/services` and it auto-appears in the UI.
+* **Secure by design**: tokens stored in Supabase with RLS; front-end never hits providers directly (unless you opt-in).
+* **Offline-friendly**: all assets served locally; works on air-gapped networks.
+
+---
+## 🚀 Quick Start
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/mcpmessenger/messenger.git mcp-messenger && cd mcp-messenger
+
+# 2. Install dependencies (pnpm, npm or yarn)
+pnpm i
+
+# 3. Copy env and set Supabase keys / JWT secret
+cp example.env .env
+vim .env   # or your editor of choice
+
+# 4. Start Supabase (if you don't already have one)
+#    → https://supabase.com/docs/guides/self-hosting
+
+# 5. Launch everything (Vite + Gateway)
+pnpm run dev
+
+# 6. Open the app
+open http://localhost:5173          # macOS
+# or
+start http://localhost:5173         # Windows
+```
+
+> **Need production?** Deploy the front-end to Vercel/Netlify and the gateway to Fly.io/Render.  Set `VITE_BACKEND_URL` to point at your gateway.
+
+---
+## 🔧 Configuration Cheatsheet
+
+| Variable | Example | Notes |
+|----------|---------|-------|
+| `SUPABASE_URL` | `https://abc.supabase.co` | Your Supabase project URL |
+| `SUPABASE_ANON_KEY` | `ey…` | Browser key – OK to expose |
+| `JWT_SECRET` | `super-secret` | Same secret shared by gateway & database |
+| `VITE_BACKEND_URL` | `http://localhost:3002` | Where the Express gateway runs |
+
+Add provider-specific keys in **Settings → Integrations** inside the app UI.
+
+---
+## 🛠 Local Development
+
+* **Vite dev-server**: hot reloads React/TSX & Tailwind.
+* **Express gateway**: auto-restarts with `nodemon`.
+* **Storybook**: `pnpm storybook` to view UI components in isolation.
+
+---
+## 📦 Building for Production
+
+```bash
+pnpm run build          # compiles & minifies front-end
+node server.js          # starts gateway on :3002
+```
+
+Serve the `dist/` folder with Nginx/Caddy or your cloud host of choice.
+
+---
+<!-- Everything below this line is the historical changelog and legacy docs. -->
+
+# MCP Messenger
+
 ## 🚀 June 22 2025 – Jira MVP, Port Alignment & UI polish
 
 * **Jira connector ready:** Front-end now supports OAuth (3-LO) flow and slash commands (`/jira list projects`, `create issue`, etc.).
