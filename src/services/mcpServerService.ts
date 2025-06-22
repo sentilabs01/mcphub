@@ -56,6 +56,8 @@ export class MCPServerService {
       // @ts-ignore – import.meta exists in Vite runtime
       const fallbackUrl = import.meta.env[envKey] as string | undefined;
       if (fallbackUrl) {
+        // Auto-heal: create row so future fetches use DB instead of env
+        this.ensureServerRow(id, fallbackUrl);
         console.info(`[MCP] Using environment fallback (${envKey}) for server '${id}'.`);
         return {
           id,
@@ -205,5 +207,24 @@ export class MCPServerService {
         return data.apiurl || data.api_url || undefined;
       })()
     };
+  }
+
+  /** Auto-heal: ensure a single valid row exists for <id>. If none – insert; if duplicates – keep first & delete rest. */
+  static async ensureServerRow(id: string, apiurl: string): Promise<void> {
+    const { data, error } = await supabase.from('mcp_servers').select('id').eq('id', id);
+    if (error) {
+      console.warn('[MCP] ensureServerRow: could not query mcp_servers', error.message);
+      return;
+    }
+    if (!data || data.length === 0) {
+      await supabase.from('mcp_servers').insert({ id, apiurl, status: 'active' });
+      console.info(`[MCP] Auto-created mcp_servers row for '${id}'.`);
+    } else if (data.length > 1) {
+      // delete all but first row
+      const keepId = data[0].id;
+      const dupIds = data.slice(1).map((r: any) => r.id);
+      await supabase.from('mcp_servers').delete().in('id', dupIds);
+      console.info(`[MCP] Removed duplicate rows for server '${id}':`, dupIds.join(', '));
+    }
   }
 }
