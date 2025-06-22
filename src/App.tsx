@@ -5,7 +5,6 @@ import { ChatBarInputProvider } from './context/ChatBarInputContext';
 import { useAuth } from './hooks/useAuth';
 import { AuthModal } from './components/auth/AuthModal';
 import { Button } from './components/ui/Button';
-import { Card } from './components/ui/Card';
 import { ChatBar } from './components/ui/ChatBar';
 import { IntegrationsGallery } from './components/ui/IntegrationsGallery';
 import { GoogleOAuthProvider } from '@react-oauth/google';
@@ -18,6 +17,7 @@ import { ServerStatusIndicator } from './components/ui/ServerStatusIndicator';
 import { IntegrationsDropdown } from './components/ui/IntegrationsDropdown';
 import { useSupabaseCredentialSync } from './hooks/useSupabaseCredentialSync';
 import { CommandStatusIndicator } from './components/ui/CommandStatusIndicator';
+import { useGoogleAutoRefresh } from './hooks/useGoogleAutoRefresh';
 // import { EnhancedChatUI } from './components/ui/EnhancedChatUI';
 // import { useAuth } from './hooks/useAuth';
 // import { AuthModal } from './components/auth/AuthModal';
@@ -33,7 +33,7 @@ import { CommandStatusIndicator } from './components/ui/CommandStatusIndicator';
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string || '';
 
 function MinimalAppContent() {
-  const { user, loading, signOut } = useAuth();
+  const { user, loading } = useAuth();
   const [authModalOpen, setAuthModalOpen] = React.useState(false);
   const [darkMode, setDarkMode] = React.useState(() => {
     return localStorage.getItem('darkMode') === 'true';
@@ -87,6 +87,9 @@ function MinimalAppContent() {
     const id = setInterval(check, 5000);
     return () => clearInterval(id);
   }, []);
+
+  // Keep Google access_token fresh
+  useGoogleAutoRefresh();
 
   if (loading) {
     return <div className={`min-h-screen flex items-center justify-center text-xl ${darkMode ? 'bg-black text-white' : 'bg-gray-50'}`}>Loading...</div>;

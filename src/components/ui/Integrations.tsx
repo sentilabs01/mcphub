@@ -13,7 +13,7 @@ import {
 } from '../../services/userIntegrationAccountsService';
 import { PROVIDER_COMMANDS } from '../../utils/providerCommands';
 import { useChatBarInput } from '../../context/ChatBarInputContext';
-import { safeSet, safeRemove } from '../../utils/safeLocal';
+import { safeSet } from '../../utils/safeLocal';
 import { splitMcpEndpoint } from '../../utils/zapier';
 
 // Static URLs for automation connectors
@@ -227,6 +227,8 @@ export const Integrations: React.FC<{ darkMode?: boolean; selectedProvider?: str
   const handleGithubTokenChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const token = e.target.value;
     setNewGithubToken(token);
+    // Persist immediately so token survives page reloads even before switching accounts
+    safeSet('github_token', token);
     if (user) {
       const accounts = await getUserIntegrationAccounts(user.id);
       const github = accounts.find((a: any) => a.provider === 'github');
