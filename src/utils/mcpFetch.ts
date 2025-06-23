@@ -19,7 +19,7 @@ export async function mcpFetch<T = any>(input: RequestInfo | URL, init: RequestI
   let res: Response;
   try {
     res = await fetch(input, { ...init, headers });
-  } catch (networkErr: any) {
+  } catch {
     const err: MCPError = Object.assign(new Error('Network error'), {
       code: 'NETWORK' as const,
     });

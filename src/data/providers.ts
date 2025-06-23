@@ -11,14 +11,6 @@ export interface ProviderMeta {
 
 export const PROVIDERS: ProviderMeta[] = [
   {
-    id: 'github',
-    name: 'GitHub',
-    logo: '/logos/Octicons-mark-github.svg',
-    logoDark: '/logos/github.png',
-    mcpServerId: 'github',
-    commands: ['list-repos', 'create-repo', 'get-issues', 'get-file'],
-  },
-  {
     id: 'google_drive',
     name: 'Google Drive',
     logo: '/logos/google-drive-icon-google-product-illustration-free-png.webp',
@@ -65,6 +57,21 @@ export const PROVIDERS: ProviderMeta[] = [
       'search_people',
       'get_contacts'
     ],
+  },
+  {
+    id: 'google_calendar',
+    name: 'Google Calendar',
+    logo: '/logos/Google_Calendar_icon_(2020).svg.png',
+    mcpServerId: 'google_calendar',
+    commands: ['List events', 'Create event', 'Update event', 'Delete event'],
+  },
+  {
+    id: 'github',
+    name: 'GitHub',
+    logo: '/logos/Octicons-mark-github.svg',
+    logoDark: '/logos/github.png',
+    mcpServerId: 'github',
+    commands: ['list-repos', 'create-repo', 'get-issues', 'get-file'],
   },
   {
     id: 'anthropic',
@@ -155,13 +162,6 @@ export const PROVIDERS: ProviderMeta[] = [
     logo: '/logos/zapier-logo-svg-vector.svg',
     mcpServerId: 'zapier',
     commands: ['Execute command', 'Execute workflow']
-  },
-  {
-    id: 'google_calendar',
-    name: 'Google Calendar',
-    logo: '/logos/Google_Calendar_icon_(2020).svg.png',
-    mcpServerId: 'google_calendar',
-    commands: ['List events', 'Create event', 'Update event', 'Delete event'],
   },
   {
     id: 'cursor',

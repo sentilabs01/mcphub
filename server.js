@@ -4,6 +4,7 @@
  * Only Zapier handler implemented fully for demo; other providers echo back.
  */
 
+import 'dotenv/config';
 import express from 'express';
 import fetch from 'node-fetch';
 import cors from 'cors';
@@ -33,6 +34,43 @@ app.delete('/api/user/slack-token', (req, res) => {
   res.json({ ok: true });
 });
 
+// ----- Minimal Jira OAuth stubs (local dev) -----
+// These endpoints simulate a backend Jira OAuth flow so the front-end portal
+// can render without hitting "Failed to fetch" during local development.
+
+// Returns dummy connection status
+app.get('/api/jira/status', (_req, res) => {
+  const connected = false; // TODO: wire actual status
+  res.json({ connected });
+});
+
+// Returns Atlassian OAuth 3-LO authorization URL with correct params
+app.get('/api/jira/url', (_req, res) => {
+  const CLIENT_ID = process.env.ATLASSIAN_CLIENT_ID || '<YOUR_CLIENT_ID>'; // TODO env
+  const REDIRECT = process.env.JIRA_REDIRECT_URI || 'http://localhost:3002/api/auth/jira/callback';
+  const scopes = [
+    'read:jira-user',
+    'read:jira-work',
+    'write:jira-work',
+    'offline_access'
+  ].join(' ');
+
+  const u = new URL('https://auth.atlassian.com/authorize');
+  u.searchParams.set('audience', 'api.atlassian.com');
+  u.searchParams.set('client_id', CLIENT_ID);
+  u.searchParams.set('scope', scopes);
+  u.searchParams.set('redirect_uri', REDIRECT);
+  u.searchParams.set('response_type', 'code');
+  u.searchParams.set('state', 'dev'); // replace with nonce in prod
+
+  res.json({ authorizationUrl: u.toString() });
+});
+
+// Disconnect endpoint (no-op for now)
+app.post('/api/jira/disconnect', (_req, res) => {
+  res.json({ ok: true });
+});
+
 // Slack OAuth redirect helper (dev)
 app.get('/api/slack/auth', (req, res) => {
   const clientId = req.query.client_id || process.env.SLACK_CLIENT_ID || '<YOUR_CLIENT_ID>';
@@ -51,7 +89,7 @@ app.get('/api/slack/auth', (req, res) => {
 
 // Simple callback placeholder – exchange code for tokens in real impl
 app.get('/api/slack/callback', (req, res) => {
-  res.send('Slack OAuth completed. Implement token exchange here and redirect to MCP Messenger.');
+  res.send('Slack OAuth completed. Implement token exchange here and redirect to MCP messenger.');
 });
 
 // Simple router
@@ -486,7 +524,9 @@ app.post('/command', commandController);
 // Alias used by current front-end build (no rewrite)
 app.post('/api/command', commandController);
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, status: 'ok' });
+});
 
 // Default gateway port; front-end dev proxy is configured accordingly in vite.config.ts
 const PORT = process.env.PORT || 3002;

@@ -16,15 +16,22 @@ import { PROVIDERS } from "../../data/providers";
 import type { ProviderMeta } from "../../data/providers";
 
 // Providers to hide from carousel
-const HIDDEN_PROVIDER_IDS = new Set(["chroma", "jupyter", "figma", "bolt", "21st_dev", "lovable"]);
+const HIDDEN_PROVIDER_IDS = new Set(["chroma", "jupyter", "figma", "bolt", "21st_dev", "lovable", "cursor", "zapier_cli"]);
 
 // Filtered list used throughout this component
 const ACTIVE_PROVIDERS = PROVIDERS.filter(p => !HIDDEN_PROVIDER_IDS.has(p.id));
 
-// Build default logo list from PROVIDERS (unique)
+const GOOGLE_IDS = ['google_drive', 'gmail', 'google_calendar'];
+// Group Google providers first to keep Google products together
+const ORDERED_PROVIDERS = [
+  ...ACTIVE_PROVIDERS.filter(p => GOOGLE_IDS.includes(p.id)),
+  ...ACTIVE_PROVIDERS.filter(p => !GOOGLE_IDS.includes(p.id)),
+];
+
+// Build default logo list from ordered providers (unique)
 const localLogos = Array.from(new Set([
-  ...ACTIVE_PROVIDERS.map(p => p.logo),
-  ...ACTIVE_PROVIDERS.flatMap(p => (p.logoDark ? [p.logoDark] : []))
+  ...ORDERED_PROVIDERS.map(p => p.logo),
+  ...ORDERED_PROVIDERS.flatMap(p => (p.logoDark ? [p.logoDark] : []))
 ]));
 
 export const AnimatedCarousel = ({

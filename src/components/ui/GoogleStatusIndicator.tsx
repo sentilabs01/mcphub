@@ -14,7 +14,9 @@ export const GoogleStatusIndicator: React.FC = () => {
   useEffect(() => {
     const check = () => {
       const tok = localStorage.getItem('google_access_token') || localStorage.getItem('google_token');
-      setConnected(tok ? true : false);
+      const exp = Number(localStorage.getItem('google_access_token_exp') || '0');
+      const valid = !!tok && (!exp || Date.now() < exp - 60_000); // 1-min buffer
+      setConnected(valid);
     };
 
     check();
@@ -31,6 +33,21 @@ export const GoogleStatusIndicator: React.FC = () => {
           connected === null ? 'bg-gray-400' : connected ? 'bg-green-500' : 'bg-red-500'
         }`}
       />
+      {connected && (
+        <button
+          onClick={() => {
+            // Remove cached tokens so user can re-authenticate
+            ['google_access_token', 'google_access_token_exp', 'google_token', 'googleToken'].forEach((k) =>
+              localStorage.removeItem(k)
+            );
+            setConnected(false);
+          }}
+          className="ml-2 text-xs text-red-500 hover:text-red-700 focus:outline-none"
+          title="Sign out of Google"
+        >
+          Disconnect
+        </button>
+      )}
     </div>
   );
 }; 

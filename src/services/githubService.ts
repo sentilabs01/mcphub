@@ -11,7 +11,7 @@ export async function fetchUserRepos(token: string): Promise<any[]> {
     }
     const data = await response.json();
     return data;
-  } catch (err) {
+  } catch {
     return [];
   }
 }

@@ -33,7 +33,7 @@ import { useGoogleAutoRefresh } from './hooks/useGoogleAutoRefresh';
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string || '';
 
 function MinimalAppContent() {
-  const { user, loading } = useAuth();
+  const { user, loading, signOut, signInWithGoogle } = useAuth();
   const [authModalOpen, setAuthModalOpen] = React.useState(false);
   const [darkMode, setDarkMode] = React.useState(() => {
     return localStorage.getItem('darkMode') === 'true';
@@ -76,20 +76,46 @@ function MinimalAppContent() {
   // Keep local tokens in sync with Supabase changes
   useSupabaseCredentialSync(user?.id);
 
-  // Google connection state – used to colour dot on avatar
-  const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
+  // Keep Google access_token fresh
+  useGoogleAutoRefresh();
+
+  // Google connection state – controls coloured dot on avatar
+  const [googleConnected, setGoogleConnected] = useState(false);
+
   useEffect(() => {
-    const check = () => {
+    const update = () => {
       const tok = localStorage.getItem('google_access_token') || localStorage.getItem('google_token');
-      setGoogleConnected(tok ? true : false);
+      const exp = Number(localStorage.getItem('google_access_token_exp') || '0');
+      const valid = !!tok && (!exp || Date.now() < exp - 60_000);
+      setGoogleConnected(valid);
     };
-    check();
-    const id = setInterval(check, 5000);
+    update();
+    const id = setInterval(update, 5000);
     return () => clearInterval(id);
   }, []);
 
-  // Keep Google access_token fresh
-  useGoogleAutoRefresh();
+  const disconnectGoogle = () => {
+    ['google_access_token', 'google_access_token_exp', 'google_token', 'googleToken'].forEach((k) =>
+      localStorage.removeItem(k)
+    );
+    setGoogleConnected(false);
+  };
+
+  // Avatar menu state
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      const menuEl = document.getElementById('avatar-menu');
+      if (menuEl && !menuEl.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', onClick);
+    return () => window.removeEventListener('mousedown', onClick);
+  }, [menuOpen]);
 
   if (loading) {
     return <div className={`min-h-screen flex items-center justify-center text-xl ${darkMode ? 'bg-black text-white' : 'bg-gray-50'}`}>Loading...</div>;
@@ -154,10 +180,52 @@ function MinimalAppContent() {
             <Avatar>
               <AvatarImage src={user?.user_metadata?.picture || ''} alt={user?.email || 'User'} />
             </Avatar>
-            {googleConnected !== null && (
-              <span
-                className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${googleConnected ? 'bg-green-500' : 'bg-red-500'}`}
-              />
+            <span
+              className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${googleConnected ? 'bg-green-500' : 'bg-red-500'}`}
+              title={googleConnected ? 'Google connected' : 'Google not connected'}
+            />
+            <button
+              className="absolute inset-0 w-full h-full rounded-full focus:outline-none"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen((o) => !o);
+              }}
+            >
+              <span className="sr-only">Avatar menu</span>
+            </button>
+            {menuOpen && (
+              <div
+                id="avatar-menu"
+                className="absolute right-0 mt-2 w-48 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded shadow-lg z-50"
+              >
+                <button
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-zinc-700"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    disconnectGoogle();
+                  }}
+                >
+                  Disconnect Google
+                </button>
+                <button
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-zinc-700"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    signOut();
+                  }}
+                >
+                  Log out
+                </button>
+                <button
+                  className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-zinc-700"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    signInWithGoogle();
+                  }}
+                >
+                  Switch Google account
+                </button>
+              </div>
             )}
           </div>
         </div>

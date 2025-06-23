@@ -1,4 +1,7 @@
-export async function listDriveFiles(token: string): Promise<any[]> {
+import { getValidGoogleToken } from './googleToken';
+
+export async function listDriveFiles(token?: string): Promise<any[]> {
+  if (!token) token = await getValidGoogleToken();
   try {
     const response = await fetch('https://www.googleapis.com/drive/v3/files', {
       headers: {
@@ -8,7 +11,7 @@ export async function listDriveFiles(token: string): Promise<any[]> {
     if (!response.ok) throw new Error('Failed to fetch Drive files');
     const data = await response.json();
     return data.files || [];
-  } catch (err) {
+  } catch {
     return [];
   }
 }
@@ -101,7 +104,8 @@ export async function searchDriveFiles(token: string, query: string): Promise<an
   return data.files || [];
 }
 
-export async function listGmailMessages(token: string, maxResults: number = 10): Promise<any[]> {
+export async function listGmailMessages(token?: string, maxResults: number = 10): Promise<any[]> {
+  if (!token) token = await getValidGoogleToken();
   try {
     // Step 1: List message IDs
     const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}`, {
@@ -121,7 +125,7 @@ export async function listGmailMessages(token: string, maxResults: number = 10):
       })
     );
     return messages.filter(Boolean);
-  } catch (err) {
+  } catch {
     return [];
   }
 } 

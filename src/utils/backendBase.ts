@@ -1,0 +1,1 @@
+export const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3002'; 

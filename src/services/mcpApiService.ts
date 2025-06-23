@@ -61,7 +61,7 @@ export async function runMCPCommand(apiUrl: string, apiKey: string, command: str
   const data = res;
   if (typeof window !== 'undefined') {
     // Front-end dev helper: inspect gateway responses in browser console
-    // eslint-disable-next-line no-console
+     
     console.log('[MCP result]', data);
   }
   return data;

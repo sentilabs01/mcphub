@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Globe } from 'lucide-react';
+import { backendBase } from '../../utils/backendBase';
 
 export const ServerStatusIndicator: React.FC = () => {
   const [online, setOnline] = useState<boolean | null>(null);
@@ -8,7 +9,7 @@ export const ServerStatusIndicator: React.FC = () => {
     let isMounted = true;
     const checkServer = async () => {
       try {
-        const res = await fetch('/api/health', { method: 'GET' });
+        const res = await fetch(`${backendBase}/api/health`, { method: 'GET' });
         if (isMounted) setOnline(res.ok);
       } catch {
         if (isMounted) setOnline(false);
