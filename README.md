@@ -393,3 +393,22 @@ Add the integration token in **Integrations → Notion Portal** and you can now 
 ```
 
 ---
+
+## OAuth Migration Roadmap (added 2025-06-23)
+
+We currently authenticate to most third-party providers (GitHub, Google Drive, Slack, etc.) with **personal-access tokens** that the user pastes into the Provider Portal.
+
+The next milestone is to replace these manual tokens with full **OAuth2 flows** wherever the provider supports it.
+
+Planned providers & scopes:
+
+| Provider | OAuth flow | Key scopes / permissions |
+| -------- | ---------- | ------------------------ |
+| GitHub   | OAuth App  | `repo`, `workflow`, `gist` |
+| Google   | Google OAuth (3-LO) | Drive read/write, Gmail read-only, Calendar read-only |
+| Slack    | Slack OAuth v2 | `chat:write`, `channels:read`, `commands` |
+| Notion   | Public integration | `database`, `content` |
+| Jira     | Atlassian OAuth 3-LO | `read:jira-work`, `write:jira-work` |
+| ClickHouse | — | N/A (PAT only) |
+
+All legacy PAT inputs will remain available until the OAuth rollout is complete.

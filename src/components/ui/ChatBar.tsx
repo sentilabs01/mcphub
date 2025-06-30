@@ -29,6 +29,20 @@ import { safeGet, safeSet } from '../../utils/safeLocal';
 import { fetchStoredSlackToken } from '../../services/slackService';
 import { useToken } from '../../hooks/useToken';
 
+// BEGIN ADD: Type for command metadata
+interface CommandMeta {
+  id: string;
+  provider: string;
+  description?: string;
+  parameters?: Array<{
+    name: string;
+    type: string;
+    required?: boolean;
+    description?: string;
+  }>;
+}
+// END ADD
+
 const PROVIDER_OPTIONS: { label: string; value: LLMProvider }[] = [
   { label: 'OpenAI', value: 'openai' },
   { label: 'Anthropic', value: 'anthropic' },
@@ -209,6 +223,11 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   const { token: openaiTokenHook } = useToken('openai');
   const { token: anthropicTokenHook } = useToken('anthropic');
   const { token: googleTokenHook } = useToken('google');
+  // BEGIN ADD: builder modal state
+  const [builderMeta, setBuilderMeta] = React.useState<CommandMeta | null>(null);
+  const [builderProvider, setBuilderProvider] = React.useState<string>('');
+  const [builderValues, setBuilderValues] = React.useState<Record<string, string>>({});
+  // END ADD
 
   // Load settings and history from Supabase or localStorage on mount
   useEffect(() => {
@@ -1258,10 +1277,30 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
   };
 
   // Handle suggestion click (re-added after refactor)
-  const handleSuggestionClick = (cmd: string) => {
+  const handleSuggestionClick = async (cmd: string) => {
     setInput(cmd + ' ');
     setShowCommandSuggestions(false);
     inputRef.current?.focus();
+
+    // Attempt to fetch command metadata for parameter builder
+    try {
+      const m = cmd.match(/^\/([a-zA-Z0-9_-]+)\s+(.+)/);
+      if (!m) return;
+      const prov = m[1];
+      const slug = m[2];
+      const server = await MCPServerService.getServerById(prov);
+      if (!server || !server.apiUrl) return;
+      const meta: CommandMeta[] = await fetchMCPCommands(server.apiUrl, '');
+      const found = meta.find((c) => c.id?.endsWith(slug) || c.id === slug || c.id?.split('.').pop() === slug);
+      if (found && found.parameters && found.parameters.length > 0) {
+        // initialise builder values
+        const initial: Record<string, string> = {};
+        found.parameters.forEach((p) => { initial[p.name] = ''; });
+        setBuilderValues(initial);
+        setBuilderMeta(found);
+        setBuilderProvider(prov);
+      }
+    } catch {}
   };
 
   const handleClearHistory = async () => {
@@ -1387,6 +1426,49 @@ export const ChatBar: React.FC<{ darkMode?: boolean }> = ({ darkMode }) => {
                 {cmd}
               </div>
             ))}
+          </div>
+        )}
+        {builderMeta && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setBuilderMeta(null)}>
+            <div className={`w-full max-w-md mx-4 p-6 rounded-lg shadow-lg ${darkMode ? 'bg-zinc-800 text-white' : 'bg-white text-black'}`} onClick={e => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold mb-4">{builderMeta.id}</h3>
+              <form className="space-y-4" onSubmit={e => { e.preventDefault(); }}>
+                {builderMeta.parameters?.map((p) => (
+                  <div key={p.name} className="flex flex-col">
+                    <label className="text-sm font-medium mb-1">{p.name}{p.required && '*'}</label>
+                    <input
+                      type="text"
+                      value={builderValues[p.name] || ''}
+                      onChange={(e) => setBuilderValues(prev => ({ ...prev, [p.name]: e.target.value }))}
+                      placeholder={p.description || ''}
+                      className={`border rounded px-2 py-1 text-sm ${darkMode ? 'bg-zinc-700 border-zinc-600' : 'border-gray-300'}`}
+                    />
+                  </div>
+                ))}
+                <div className="flex justify-end space-x-2">
+                  <button type="button" onClick={() => setBuilderMeta(null)} className="text-sm px-3 py-1 rounded border">Cancel</button>
+                  <button type="button"
+                    onClick={() => {
+                      // compose command string & inject into input
+                      if (!builderMeta) return;
+                      const slug = builderMeta.id.split('.').pop() || builderMeta.id;
+                      const parts: string[] = [];
+                      builderMeta.parameters?.forEach((p) => {
+                        const val = (builderValues[p.name] || '').trim();
+                        if (val) {
+                          const needsQuote = /\s/.test(val);
+                          parts.push(`${p.name}=${needsQuote ? `"${val}"` : val}`);
+                        }
+                      });
+                      const finalCmd = `/${builderProvider} ${slug} ${parts.join(' ')}`.trim();
+                      setInput(finalCmd + ' ');
+                      setBuilderMeta(null);
+                      inputRef.current?.focus();
+                    }}
+                    className="text-sm px-3 py-1 rounded bg-blue-600 text-white">Insert</button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
       </div>
