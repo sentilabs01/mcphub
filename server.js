@@ -92,6 +92,77 @@ app.get('/api/slack/callback', (req, res) => {
   res.send('Slack OAuth completed. Implement token exchange here and redirect to MCP messenger.');
 });
 
+// After imports and before app.use middleware
+// BEGIN ADD: Static command catalog and helper endpoints
+const commandCatalog = [
+  {
+    id: 'google_drive.list_files',
+    provider: 'google_drive',
+    description: 'List files in the user\'s Google Drive account',
+    parameters: [],
+  },
+  {
+    id: 'google_drive.search_files',
+    provider: 'google_drive',
+    description: 'Search files in Google Drive by name substring',
+    parameters: [
+      {
+        name: 'query',
+        type: 'string',
+        required: true,
+        description: 'Search phrase to match file names',
+      },
+    ],
+  },
+  {
+    id: 'google_calendar.list_calendars',
+    provider: 'google_calendar',
+    description: 'List Google Calendars for the authorised user',
+    parameters: [],
+  },
+  {
+    id: 'github.list_repos',
+    provider: 'github',
+    description: 'List repositories for the authenticated user',
+    parameters: [],
+  },
+  {
+    id: 'github.create_repo',
+    provider: 'github',
+    description: 'Create a new GitHub repository under the authenticated account',
+    parameters: [
+      {
+        name: 'name',
+        type: 'string',
+        required: true,
+        description: 'Name of the repository to create',
+      },
+    ],
+  },
+];
+
+// GET /api/commands – return full catalog
+app.get('/api/commands', (_req, res) => {
+  res.json(commandCatalog);
+});
+
+// ALIAS: /commands without prefix for legacy clients
+app.get('/commands', (_req, res) => {
+  res.json(commandCatalog);
+});
+
+// GET /api/providers – aggregate providers from catalog
+app.get('/api/providers', (_req, res) => {
+  const providersMap = {};
+  for (const cmd of commandCatalog) {
+    if (!providersMap[cmd.provider]) providersMap[cmd.provider] = [];
+    providersMap[cmd.provider].push(cmd.id);
+  }
+  const providersArr = Object.keys(providersMap).map((id) => ({ id, commands: providersMap[id] }));
+  res.json(providersArr);
+});
+// END ADD
+
 // Simple router
 const commandController = async (req, res) => {
   const { provider, command = '', apiKey = '' } = req.body;
@@ -223,7 +294,7 @@ const commandController = async (req, res) => {
         const cmd = command.toLowerCase().trim();
 
         // Create repository: "create-repo <name>"
-        const createMatch = cmd.match(/^create[- ]repo\s+(.+)/i);
+        const createMatch = cmd.match(/^create[- _]repo(?:\s+name=|[- ]name=|\s+)(.+)/i);
         if (createMatch) {
           const name = createMatch[1].trim().replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 100);
           if (!name) return res.status(400).json({ error: 'Repository name required' });
