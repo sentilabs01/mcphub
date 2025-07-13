@@ -1,0 +1,23 @@
+{
+  "name": "MCP Hub",
+  "description": "Custom Make.com app to execute MCP commands & workflows.",
+  "version": "0.1.0",
+  "actions": [
+    {
+      "name": "Execute Command",
+      "type": "executeCommand",
+      "fields": ["provider", "command", "prompt", "context"],
+      "url": "{{base_url}}/api/command"
+    },
+    {
+      "name": "Execute Workflow",
+      "type": "executeWorkflow",
+      "fields": ["workflowJson", "context"],
+      "url": "{{base_url}}/api/workflow"
+    }
+  ],
+  "credentials": [
+    { "name": "base_url", "label": "Base URL", "required": true },
+    { "name": "api_key", "label": "API Key", "required": false }
+  ]
+} 
